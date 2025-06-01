@@ -67,15 +67,10 @@ struct CommandHookOps {
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
-
 	bool copyVertexInput {};
 	u32 vertexInputCmd {}; // for multi draw, specifies the command for which to copy
-	u32 indexCountHint {u32(-1)};
-	u32 vertexCountHint {u32(-1)};
-	u32 instanceCountHint {u32(-1)};
 
 	bool copyXfb {}; // transform feedback
-	u32 xfbSizeHint {u32(-1)};
 
 	IntrusivePtr<ShaderCaptureHook> shaderCapture {};
 	Vec3u32 shaderCaptureInput {}; // globalThreadID/vertexID/...
@@ -96,6 +91,12 @@ struct CommandHookOps {
 	// Pass u32(-1) to just copy everything, independent of transfers
 
 	u32 transferIdx {0u};
+};
+
+struct CommandHookHints {
+	u32 indexCountHint {0u};
+	u32 vertexCountHint {0u};
+	u32 instanceCountHint {0u};
 };
 
 // Only set the members that should be updated.
@@ -185,6 +186,7 @@ public:
 	using Target = CommandHookTarget;
 	using Ops = CommandHookOps;
 	using Update = CommandHookUpdate;
+	using Hints = CommandHookHints;
 
 	// Temporarily don't hook commands even if hook ops are set
 	// and a submission matches a target.
@@ -238,6 +240,10 @@ public:
 	VkDeviceAddress shaderCaptureAddress() const { return captureAddress_; }
 	VkBuffer shaderCaptureBuffer() const { return captureBuffer_.buf; }
 
+	Hints& hintsLocked();
+	Ops& opsLocked();
+	void invalidateRecordingsLocked(bool forceAll = false);
+
 private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
@@ -273,6 +279,7 @@ private:
 	std::vector<CompletedHook> completed_;
 	Ops ops_;
 	Target target_;
+	Hints hints_;
 	LinAllocator matchAlloc_;
 
 	std::vector<std::unique_ptr<LocalCapture>> localCaptures_;

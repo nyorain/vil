@@ -38,7 +38,7 @@ public:
 	~ShaderDebugger();
 	void init(Gui& gui);
 
-	void select(const Pipeline& pipe);
+	void select(const Pipeline& pipe, const Vec3ui& invocation = {});
 	void unselect();
 	void draw();
 

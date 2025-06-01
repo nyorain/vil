@@ -107,7 +107,9 @@ bool copyableDescriptorSame(DescriptorStateRef a, DescriptorStateRef b,
 }
 
 void invalidate(CommandHookRecord& rec) {
-	rec.hook = nullptr; // notify the record that it's no longer needed
+	rec.invalid = true;
+	rec.prev = nullptr;
+	rec.next = nullptr;
 	auto it = find(rec.record->hookRecords, &rec);
 	dlg_assert(it != rec.record->hookRecords.end());
 
@@ -956,7 +958,7 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 			dlg_assert(foundHookRecord->state);
 		}
 
-		dlg_assert(foundHookRecord->hook == this);
+		dlg_assert(!foundHookRecord->invalid);
 		dlg_assert(!foundHookRecord->writer);
 
 		// Not possible to reuse the hook-recorded cb when the command
@@ -1030,6 +1032,11 @@ void CommandHook::clearCompleted() {
 
 void CommandHook::invalidateRecordings(bool forceAll) {
 	std::lock_guard lock(dev_->mutex);
+	invalidateRecordingsLocked(forceAll);
+}
+
+void CommandHook::invalidateRecordingsLocked(bool forceAll) {
+	assertOwned(dev_->mutex);
 
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
@@ -1067,8 +1074,9 @@ void CommandHook::updateHook(Update&& update) {
 		// make sure we don't destroy these while lock is held
 		Target oldTarget;
 
-		{
+		if (update.newTarget || update.newOps) {
 			std::lock_guard lock(dev_->mutex);
+			hints_ = {};
 
 			if(update.newTarget) {
 				oldTarget = std::move(target_);
@@ -1102,6 +1110,16 @@ CommandHook::Ops CommandHook::ops() const {
 CommandHook::Target CommandHook::target() const {
 	std::lock_guard lock(dev_->mutex);
 	return target_;
+}
+
+CommandHook::Hints& CommandHook::hintsLocked() {
+	assertOwned(dev_->mutex);
+	return hints_;
+}
+
+CommandHook::Ops& CommandHook::opsLocked() {
+	assertOwned(dev_->mutex);
+	return ops_;
 }
 
 void CommandHook::addLocalCapture(std::unique_ptr<LocalCapture>&& lc) {

@@ -41,6 +41,26 @@ ReversionAdatper<T> reversed(T&& iterable) {
 u32 findLSB(u32);
 u32 nextPOT(u32);
 
+template<typename T>
+bool max(T& val, const T& other) {
+	if(other > val) {
+		val = other;
+		return true;
+	}
+
+	return false;
+}
+
+template<typename T>
+bool min(T& val, const T& other) {
+	if(other < val) {
+		val = other;
+		return true;
+	}
+
+	return false;
+}
+
 /// Does not throw on error, just outputs error.
 void writeFile(const char* path, span<const std::byte> buffer, bool binary = true);
 

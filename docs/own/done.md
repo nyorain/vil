@@ -1,3 +1,9 @@
+- [x] Allow to open where left off?
+  Would require some serialization of frames/commands/resources.
+  Also, would have to completely rework matching to work with those loaded up
+  resources/commands :/ We could *never* compare for equality.
+  But we probably explicitly want that in some cases, normally. So matching
+  would need additional options.
 - [x] can we support viewing multisample images?
       either sample them directly in shader (requires a whole lotta new
 	  shader permuatations, not sure if supported everywhere) or resolve

@@ -47,7 +47,7 @@ void ShaderDebugger::init(Gui& gui) {
 	textedit_.SetReadOnly(true);
 }
 
-void ShaderDebugger::select(const Pipeline& pipe) {
+void ShaderDebugger::select(const Pipeline& pipe, const Vec3ui& invocation) {
 	if(pipe.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
 		auto& cpipe = static_cast<const ComputePipeline&>(pipe);
 		auto mod = copySpecializeSpirv(cpipe.stage);
@@ -98,6 +98,9 @@ void ShaderDebugger::select(const Pipeline& pipe) {
 		auto mod = copySpecializeSpirv(*raygen);
 		select(raygen->stage, stageID, std::move(mod), raygen->entryPoint);
 	}
+
+	// TODO: clamp?
+	invocationID_ = invocation;
 }
 
 void ShaderDebugger::select(VkShaderStageFlagBits stage, u32 stageID,
@@ -255,7 +258,7 @@ void ShaderDebugger::draw() {
 			invocationID_.x = io.MousePos[0];
 			invocationID_.y = io.MousePos[1];
 		} else if(fragmentMode_ == FragmentMode::cursorClicked &&
-				io.MouseClicked[1]) {
+				io.MouseDown[1]) {
 			invocationID_.x = io.MousePos[0];
 			invocationID_.y = io.MousePos[1];
 		}
@@ -266,7 +269,10 @@ void ShaderDebugger::draw() {
 		if(ImGui::BeginTabBar("Tabs")) {
 			if(ImGui::BeginTabItem("Inputs")) {
 				dlg_assertl(dlg_level_warn, selection().completedHookState());
-				drawInputsTab();
+				if (selection().completedHookState()) {
+					drawInputsTab();
+				}
+
 				ImGui::EndTabItem();
 			}
 			if(ImGui::BeginTabItem("Variables")) {
@@ -293,6 +299,8 @@ void ShaderDebugger::draw() {
 					}
 				} else if(!patch_.jobs.empty()) {
 					imGuiText("[Patching...]");
+				} else if(patch_.current.captures.empty()) {
+					imGuiText("No variables captured");
 				} else {
 					imGuiText("[Waiting for capture...]");
 				}
@@ -391,9 +399,13 @@ ShaderDebugger::DrawCmdInfo ShaderDebugger::drawCmdInfo(u32 cmd) const {
 		return {0u, 4u, 1u, 0u, 0u};
 	}
 
-	auto readIndirect = [&](bool indexed, u32 numCmds) {
+	auto readIndirect = [&](bool indexed, u32 numCmds, bool skipCount) {
 		auto& ic = hookState->indirectCopy;
 		auto span = ic.data();
+
+		if(skipCount) {
+			span = span.subspan(4u);
+		}
 
 		dlg_assert(cmd < numCmds);
 		if(indexed) {
@@ -419,10 +431,10 @@ ShaderDebugger::DrawCmdInfo ShaderDebugger::drawCmdInfo(u32 cmd) const {
 	};
 
 	if(auto* idcmd = dynamic_cast<const DrawIndirectCmd*>(baseCmd); idcmd) {
-		return readIndirect(idcmd->indexed, idcmd->drawCount);
+		return readIndirect(idcmd->indexed, idcmd->drawCount, false);
 	} else if(auto* idcmd = dynamic_cast<const DrawIndirectCountCmd*>(baseCmd); idcmd) {
 		dlg_assert(hookState);
-		return readIndirect(idcmd->indexed, hookState->indirectCommandCount);
+		return readIndirect(idcmd->indexed, hookState->indirectCommandCount, true);
 	} else if(auto* dcmd = dynamic_cast<const DrawCmd*>(baseCmd); dcmd) {
 		return {
 			i32(dcmd->firstVertex),
@@ -769,11 +781,19 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	CommandHookUpdate hookUpdate;
 	hookUpdate.invalidate = true;
 	auto& ops = hookUpdate.newOps.emplace();
-	ops.copyIndirectCmd = true;
+
+	auto* baseCmd = selection().command().back();
+	if(baseCmd && isIndirect(*baseCmd)) {
+		ops.copyIndirectCmd = true;
+	}
+
 	ops.shaderCapture = patch_.current.hook;
 	ops.shaderCaptureInput = Vec3u32(invocationID_);
 	hook.updateHook(std::move(hookUpdate));
-	selection().clearState();
+
+	// TODO: ideally, we would want this. But this makes
+	// editing values annoying, causes flickering UI
+	// selection().clearState();
 }
 
 bool ShaderDebugPatch::updateJobs(Device& dev) {

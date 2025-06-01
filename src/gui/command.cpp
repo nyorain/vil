@@ -1350,7 +1350,8 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				auto uh = vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd,
+					*hookState, gui_->dt(), *this);
 				if(uh) {
 					updateHook();
 				}
@@ -1364,7 +1365,8 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = true;
 				updateHook();
 			} else {
-				vertexViewer_.displayOutput(draw, *drawCmd, *hookState, gui_->dt());
+				vertexViewer_.displayOutput(draw, *drawCmd, *hookState,
+					gui_->dt(), *this);
 			}
 
 			ImGui::EndTabItem();
@@ -1553,9 +1555,7 @@ void CommandViewer::displayCommand() {
 		auto supported = dcmd->category() != CommandCategory::traceRays ||
 			dcmd->type() == CommandType::traceRays;
 		if(supported && dcmd->boundPipe() && ImGui::Button("Debug shader")) {
-			shaderDebugger_.select(*dcmd->boundPipe());
-			view_ = IOView::shader;
-			doUpdateHook_ = true;
+			selectShaderDebugger(*dcmd->boundPipe());
 			return;
 		}
 	}
@@ -1800,6 +1800,12 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 
 CommandSelection& CommandViewer::selection() const {
 	return gui_->cbGui().selector();
+}
+
+void CommandViewer::selectShaderDebugger(const Pipeline& pipe, const Vec3ui& invocation) {
+	shaderDebugger_.select(pipe, invocation);
+	view_ = IOView::shader;
+	doUpdateHook_ = true;
 }
 
 } // namespace vil

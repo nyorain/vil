@@ -22,23 +22,23 @@
 namespace vil {
 
 // record
-CommandHookRecord::CommandHookRecord(CommandHook& xhook,
+CommandHookRecord::CommandHookRecord(CommandHook& hook,
 	CommandRecord& xrecord, std::vector<const Command*> hooked,
 	const CommandDescriptorSnapshot& descriptors,
 	const CommandHookOps& ops, LocalCapture* xlocalCapture) :
-		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
+		record(&xrecord), hcommand(std::move(hooked)) {
 
 	++DebugStats::get().aliveHookRecords;
-	assertOwned(xhook.dev_->mutex);
+	assertOwned(hook.dev_->mutex);
 
 	this->localCapture = xlocalCapture;
-	this->next = hook->records_;
-	if(hook->records_) {
-		hook->records_->prev = this;
+	this->next = hook.records_;
+	if(hook.records_) {
+		hook.records_->prev = this;
 	}
-	hook->records_ = this;
+	hook.records_ = this;
 
-	hookCounter = hook->counter_;
+	hookCounter = hook.counter_;
 
 	auto& dev = *xrecord.dev;
 
@@ -53,7 +53,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	dev.setDeviceLoaderData(dev.handle, this->cb);
 	nameHandle(dev, this->cb, "CommandHookRecord:cb");
 
-	RecordInfo info {ops};
+	RecordInfo info {ops, hook.hintsLocked()};
 	info.descriptors = &descriptors;
 	initState(info);
 
@@ -159,10 +159,16 @@ CommandHookRecord::~CommandHookRecord() {
 	if(prev) {
 		prev->next = next;
 	}
-	if(hook && this == hook->records_) {
+
+	auto& hook = commandHook();
+	if(this == hook.records_) {
 		dlg_assert(!prev);
-		hook->records_ = next;
+		hook.records_ = next;
 	}
+}
+
+CommandHook& CommandHookRecord::commandHook() const {
+	return *record->dev->commandHook;
 }
 
 void CommandHookRecord::initState(RecordInfo& info) {
@@ -422,6 +428,27 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 	}
 }
 
+u32 CommandHookRecord::vertexCountHint(const DrawCmdBase& bcmd, const RecordInfo& info) const {
+	if(auto* dcmd = commandCast<const DrawCmd*>(&bcmd); dcmd) {
+		return dcmd->vertexCount;
+	} else if(auto* dcmd = commandCast<const DrawIndexedCmd*>(&bcmd); dcmd) {
+		return dcmd->indexCount;
+	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&bcmd); dcmd) {
+		return dcmd->isIndexed() ? info.hints.indexCountHint : info.hints.vertexCountHint;
+	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&bcmd); dcmd) {
+		return dcmd->isIndexed() ? info.hints.indexCountHint : info.hints.vertexCountHint;
+	} else if(auto* dcmd = commandCast<const DrawMultiCmd*>(&bcmd); dcmd) {
+		auto& drawInfo = dcmd->vertexInfos[info.ops.vertexInputCmd];
+		return drawInfo.vertexCount;
+	} else if(auto* dcmd = commandCast<const DrawMultiIndexedCmd*>(&bcmd); dcmd) {
+		auto& drawInfo = dcmd->indexInfos[info.ops.vertexInputCmd];
+		return drawInfo.indexCount;
+	} else {
+		dlg_fatal("Unsupported draw command");
+		return 0u;
+	}
+}
+
 void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel cblbl(dev, cb, "vil:hookRecordDst");
@@ -441,8 +468,13 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 			dlg_assert(dev.dispatch.CmdEndTransformFeedbackEXT);
 
 			// init xfb buffer
-			auto xfbSize = 32 * 1024 * 1024; // TODO
-			auto usage =
+			auto vertexCount = vertexCountHint(*drawCmd, info);
+			if(vertexCount == 0u) {
+				vertexCount = 1 * 1024 * 1024;
+			}
+
+			const auto xfbSize = drawCmd->state->pipe->xfbPatch->stride * vertexCount;
+			const auto usage =
 				VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 				VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
 				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -654,7 +686,8 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		// check if command needs additional, manual hook
-		if(cmd->category() == CommandCategory::buildAccelStruct && hook->hookAccelStructBuilds) {
+		if(cmd->category() == CommandCategory::buildAccelStruct &&
+				commandHook().hookAccelStructBuilds) {
 
 			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);
@@ -1177,7 +1210,7 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 	// TODO:
 	// - we currently assume that index buffer offsets are aligned
 	//   to allow binding them as storage buffers. Can't assume that!
-	// - missing all the barriers!
+	// - missing barriers!
 
 	using Metadata = VertexCopyMetadata;
 
@@ -1214,8 +1247,9 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 	cmdTimestamp("start"); // name irrelevant
 
 	// returned reference only stays valid until function is called again
+	auto& hook = commandHook();
 	auto allocDs = [&](vku::DynamicPipe& pipe) -> vku::DynDs& {
-		auto ds = hook->dsAlloc_.alloc(pipe.dynDsLayout(0u), pipe.name());
+		auto ds = hook.dsAlloc_.alloc(pipe.dynDsLayout(0u), pipe.name());
 		dynds.push_back(std::move(ds));
 		return dynds.back();
 	};
@@ -1251,10 +1285,10 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 			indexType == VK_INDEX_TYPE_UINT16 ||
 			indexType == VK_INDEX_TYPE_NONE_KHR);
 
-		if(vertexCount == u32(-1)) {
+		if(vertexCount == 0u) {
 			vertexCount = fallbackVertexCountHint;
 		}
-		if(instanceCount == u32(-1)) {
+		if(instanceCount == 0u) {
 			instanceCount = fallbackInstanceCountHint;
 		}
 
@@ -1269,8 +1303,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 				(src.stride % 4u != 0u) ||
 				(src.offset % 4u != 0u);
 			auto& vertPipe = indexType == VK_INDEX_TYPE_UINT16 ?
-				useBytes ? hook->copyVerticesByte16_ : hook->copyVerticesUint16_:
-				useBytes ? hook->copyVerticesByte32_ : hook->copyVerticesUint32_;
+				useBytes ? hook.copyVerticesByte16_ : hook.copyVerticesUint16_:
+				useBytes ? hook.copyVerticesByte32_ : hook.copyVerticesUint32_;
 
 			u32 inputCount;
 			u32 isInstanceData;
@@ -1340,13 +1374,14 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		cmdTimestamp("after_CopyVertexBufs");
 	};
 
-	auto finalizeIndexedCopy = [&](u32 instanceCount){
-		auto& pipe = hook->writeVertexCmdIndexed_;
+	auto finalizeIndexedCopy = [&](u32 instanceCount, u32 numIndices){
+		auto& pipe = hook.writeVertexCmdIndexed_;
 		auto& ds = allocDs(pipe);
 
-		u32 vertexHint = info.ops.vertexCountHint;
-		if(vertexHint == u32(-1)) {
+		u32 vertexHint = info.hints.vertexCountHint;
+		if(vertexHint == 0u) {
 			vertexHint = fallbackVertexCountHint;
+			vertexHint = std::max(vertexHint, numIndices); // for indexed drawing
 		}
 
 		vku::DescriptorUpdate dsu(ds);
@@ -1395,8 +1430,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 			indexType == VK_INDEX_TYPE_UINT16);
 		const auto indSize = indexSize(indexType);
 		auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
-			hook->processIndices32_ :
-			hook->processIndices16_;
+			hook.processIndices32_ :
+			hook.processIndices16_;
 
 		auto& dst = state->indexBufCopy;
 		const auto usage =
@@ -1441,7 +1476,7 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 
 		cmdTimestamp("after_processIndices");
 
-		finalizeIndexedCopy(params.instanceCount);
+		finalizeIndexedCopy(params.instanceCount, params.indexCount);
 	};
 
 	auto indirectCopy = [&](Buffer* cmdBuf, u32 cmdBufOffset,
@@ -1452,8 +1487,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
 
 		auto& cmdPipe = countBuf ?
-			hook->writeVertexCmdCountBuf_ :
-			hook->writeVertexCmd_;
+			hook.writeVertexCmdCountBuf_ :
+			hook.writeVertexCmd_;
 		auto& ds = allocDs(cmdPipe);
 
 		vku::DescriptorUpdate dsu(ds);
@@ -1485,7 +1520,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 
 		cmdTimestamp("after_writeVertexCmd");
 
-		copyVertexBufs(true, info.ops.vertexCountHint, info.ops.instanceCountHint, VK_INDEX_TYPE_NONE_KHR);
+		copyVertexBufs(true, info.hints.vertexCountHint, info.hints.instanceCountHint,
+			VK_INDEX_TYPE_NONE_KHR);
 	};
 
 	auto indirectIndexedCopy = [&](Buffer* cmdBuf, u32 cmdBufOffset,
@@ -1496,8 +1532,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
 			indexType == VK_INDEX_TYPE_UINT16);
 
-		u32 numIndices = info.ops.indexCountHint;
-		if(numIndices == u32(-1)) {
+		u32 numIndices = info.hints.indexCountHint;
+		if(numIndices == u32(0u)) {
 			numIndices = fallbackIndexCountHint;
 		}
 
@@ -1509,8 +1545,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		// write index processing command
 		{
 			auto& cmdPipe = countBuf ?
-				hook->writeIndexCmdCountBuf_ :
-				hook->writeIndexCmd_;
+				hook.writeIndexCmdCountBuf_ :
+				hook.writeIndexCmd_;
 
 			auto& ds = allocDs(cmdPipe);
 			vku::DescriptorUpdate dsu(ds);
@@ -1550,8 +1586,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		// processIndicies
 		{
 			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
-				hook->processIndices32_ :
-				hook->processIndices16_;
+				hook.processIndices32_ :
+				hook.processIndices16_;
 
 			auto& ds = allocDs(indexPipe);
 			vku::DescriptorUpdate dsu(ds);
@@ -1572,7 +1608,7 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 			cmdTimestamp("after_processIndices");
 		}
 
-		finalizeIndexedCopy(info.ops.instanceCountHint);
+		finalizeIndexedCopy(info.hints.instanceCountHint, numIndices);
 	};
 
 	if(auto* dcmd = commandCast<DrawCmd*>(&bcmd); dcmd) {
@@ -1759,20 +1795,21 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// capturePipe
 	if(info.ops.shaderCapture) {
 		// TODO: only for debugging
-		dev.dispatch.CmdFillBuffer(cb, hook->shaderCaptureBuffer(),
-			0u, hook->shaderCaptureSize, 0x0u);
+		auto& hook = commandHook();
+		dev.dispatch.CmdFillBuffer(cb, hook.shaderCaptureBuffer(),
+			0u, hook.shaderCaptureSize, 0x0u);
 		vku::cmdBarrier(dev, cb, vku::BufferSpan{
-			hook->shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
+			hook.shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
 			vku::SyncScope::transferWrite(), vku::SyncScope::transferWrite());
 
 		Vec4u32 input {};
 		input[0] = info.ops.shaderCaptureInput[0];
 		input[1] = info.ops.shaderCaptureInput[1];
 		input[2] = info.ops.shaderCaptureInput[2];
-		dev.dispatch.CmdUpdateBuffer(cb, hook->shaderCaptureBuffer(),
+		dev.dispatch.CmdUpdateBuffer(cb, hook.shaderCaptureBuffer(),
 			0u, sizeof(input), &input);
 		vku::cmdBarrier(dev, cb, vku::BufferSpan{
-			hook->shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
+			hook.shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
 			vku::SyncScope::transferWrite(), vku::SyncScope::allShaderRead());
 	}
 }
@@ -1846,7 +1883,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		// TODO: could know exact size of captured data here.
 
 		auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		state->shaderCapture.ensure(dev, hook->shaderCaptureSize, usage);
+		state->shaderCapture.ensure(dev, commandHook().shaderCaptureSize, usage);
 
 		// barrier
 		VkMemoryBarrier memBarrier {};
@@ -1868,9 +1905,9 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		VkBufferCopy copy {};
 		copy.srcOffset = 0u;
 		copy.dstOffset = 0u;
-		copy.size = hook->shaderCaptureSize;
+		copy.size = commandHook().shaderCaptureSize;
 
-		dev.dispatch.CmdCopyBuffer(cb, hook->shaderCaptureBuffer(),
+		dev.dispatch.CmdCopyBuffer(cb, commandHook().shaderCaptureBuffer(),
 			state->shaderCapture.buf, 1, &copy);
 	}
 }
@@ -2076,7 +2113,7 @@ void CommandHookRecord::finish() noexcept {
 	} else {
 		// The only reason we might land here is when the record
 		// was invalidated.
-		dlg_assert(!hook);
+		dlg_assert(invalid);
 	}
 }
 

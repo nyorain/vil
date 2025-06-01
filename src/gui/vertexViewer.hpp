@@ -31,26 +31,37 @@ struct DrawParams {
 	u32 instanceID {};
 };
 
-struct VertexViewer {
+class VertexViewer {
+public:
+	static constexpr auto colFrustum = 0xAAFFAACCu; // red-ish
+	static constexpr auto colSelected = 0xFFAAAACCu; // green-ish
+	static constexpr auto colWireframe = 0xFFFFFFFFu; // white
+	static constexpr auto colShade = 0u;
+
+public:
 	~VertexViewer();
 
 	void init(Gui& gui);
 
 	// Returns whether hook need update
-	bool displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
-	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	bool displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt,
+		CommandViewer&);
+	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt,
+		CommandViewer&);
 	void displayTriangles(Draw&, const OwnBuffer& buf, const AccelTriangles&, float dt);
 	void displayInstances(Draw&, const AccelInstances&, float dt,
 		std::function<AccelStructStatePtr(u64)> blasResolver);
 
-	u32 selectedCommand() const { return selectedID_; }
+	u32 selectedCommand() const { return selectedCommand_; }
 
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
 	VkPipeline getOrCreatePipe(VkFormat format, u32 stride,
-		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode,
+		bool enableDepth);
 	VkPipeline createPipe(VkFormat format, u32 stride,
-		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode,
+		bool enableDepth);
 	void createFrustumPipe();
 
 	void updateInput(float dt);
@@ -93,6 +104,8 @@ private:
 	void imGuiDraw(const DrawData& data);
 	void showSettings();
 	void displayVertexID(u32 id);
+	void displayDebugPopup(u32 vertexID, CommandViewer& viewer,
+		const DrawCmdBase& cmd);
 
 private:
 	Gui* gui_ {};
@@ -123,6 +136,15 @@ private:
 		VkPrimitiveTopology topology {};
 		VkPipeline pipe {};
 		VkPolygonMode polygon {};
+		bool enableDepth {};
+	};
+
+	struct PCData {
+		Mat4f matrix;
+		u32 useW;
+		float scale;
+		u32 flipY;
+		u32 color;
 	};
 
 	std::vector<Pipe> pipes_ {};
@@ -130,12 +152,12 @@ private:
 
 	u32 selectedVertex_ {};
 
-	u32 selectedID_ {}; // command id
+	u32 selectedCommand_ {};
 	std::vector<DrawData> drawDatas_;
 
 	u32 precision_ {5u};
 	bool doClear_ {false};
-	bool flipY_ {true};
+	bool flipY_ {};
 	bool arcball_ {true}; // whether to use instead of first person cam
 	bool wireframe_ {false};
 	float arcOffset_ {1.f};

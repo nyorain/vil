@@ -62,7 +62,11 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
+- [ ] better RT AccelStruct UI
+- [ ] integrate (latest) tracy via meson subproject
+	- [ ] merge back mutex.inner
 - [ ] make optional dependencies optional (imgio)
+	- [ ] dont build with tracy by default
 - [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
 - [ ] generate structSize in util/util.cpp, it is incomplete at the moment.
       Also problematic that we cannot know the size of some platform-specific

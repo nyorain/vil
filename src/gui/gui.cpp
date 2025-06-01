@@ -612,6 +612,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 
 		auto idxOff = 0u;
 		auto vtxOff = 0u;
+		auto restoreState = false;
 		for(auto i = 0; i < drawData.CmdListsCount; ++i) {
 			auto& cmds = *drawData.CmdLists[i];
 
@@ -620,8 +621,11 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 				if(cmd.UserCallback) {
 					dlg_assert(cmd.UserCallback != ImDrawCallback_ResetRenderState);
 					cmd.UserCallback(&cmds, &cmd);
+					restoreState = true;
+					continue;
+				}
 
-					// reset state we need
+				if(restoreState) {
 					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 						pcrStages, 0, sizeof(pcr), pcr);
 					dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
@@ -629,58 +633,58 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
 					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 						pcrStages, 0, sizeof(pcr), pcr);
-				} else {
-					// TODO: we only ever really need in this im ImageViewer.
-					//   Maybe just use it there explicitly instead
-					//   of handling it here?
-					VkDescriptorSet ds = dsFont_.vkHandle();
-					VkPipeline pipe = pipes_.gui;
-					auto img = (DrawGuiImage*) cmd.TextureId;
-					if(img && img->type != ShaderImageType::count) {
-						ds = img->ds;
-						dlg_assert(img->type < ShaderImageType::count);
-						pipe = pipes_.image[img->type];
-
-						const auto isMS = ShaderImageType::isMS(img->type);
-						dlg_assertm(!isMS || img->level == 0.f, "LODs not supported for MS image");
-
-						// bind push constant data
-						struct PcrImageData {
-							float layer;
-							float valMin;
-							float valMax;
-							u32 flags;
-							float level;
-							float power;
-						} pcr = {
-							img->layer,
-							img->minValue,
-							img->maxValue,
-							img->flags,
-							// MS shader interprets level as sample
-							isMS ? img->sample : img->level,
-							img->power
-						};
-
-						dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
-							pcrStages, 16,
-							sizeof(pcr), &pcr);
-					}
-
-					dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-					dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						imguiPipeLayout_.vkHandle(), 0, 1, &ds, 0, nullptr);
-
-					VkRect2D scissor {};
-					scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
-					scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
-					scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
-					scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
-					dev.dispatch.CmdSetScissor(draw.cb, 0, 1, &scissor);
-
-					dev.dispatch.CmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
-					idxOff += cmd.ElemCount;
 				}
+
+				// TODO: we only ever really need in this im ImageViewer.
+				//   Maybe just use it there explicitly instead
+				//   of handling it here?
+				VkDescriptorSet ds = dsFont_.vkHandle();
+				VkPipeline pipe = pipes_.gui;
+				auto img = (DrawGuiImage*) cmd.TextureId;
+				if(img && img->type != ShaderImageType::count) {
+					ds = img->ds;
+					dlg_assert(img->type < ShaderImageType::count);
+					pipe = pipes_.image[img->type];
+
+					const auto isMS = ShaderImageType::isMS(img->type);
+					dlg_assertm(!isMS || img->level == 0.f, "LODs not supported for MS image");
+
+					// bind push constant data
+					struct PcrImageData {
+						float layer;
+						float valMin;
+						float valMax;
+						u32 flags;
+						float level;
+						float power;
+					} pcr = {
+						img->layer,
+						img->minValue,
+						img->maxValue,
+						img->flags,
+						// MS shader interprets level as sample
+						isMS ? img->sample : img->level,
+						img->power
+					};
+
+					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
+						pcrStages, 16,
+						sizeof(pcr), &pcr);
+				}
+
+				dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+				dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+					imguiPipeLayout_.vkHandle(), 0, 1, &ds, 0, nullptr);
+
+				VkRect2D scissor {};
+				scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
+				scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
+				scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
+				scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
+				dev.dispatch.CmdSetScissor(draw.cb, 0, 1, &scissor);
+
+				dev.dispatch.CmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
+				idxOff += cmd.ElemCount;
 			}
 
 			vtxOff += cmds.VtxBuffer.Size;

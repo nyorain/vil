@@ -24,6 +24,7 @@ using i64 = std::int64_t;
 using std::size_t;
 
 class Gui;
+class CommandViewer;
 struct RenderBuffer;
 
 struct Device;
@@ -73,6 +74,7 @@ struct CommandHookState;
 struct CommandHookTarget;
 struct LocalCapture;
 struct CommandHookOps;
+struct CommandHookHints;
 struct CompletedHook;
 struct DescriptorCopyOp;
 struct DescriptorCopyOp;

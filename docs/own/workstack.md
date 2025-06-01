@@ -1,6 +1,7 @@
 - [ ] rename vku to vpp?
 - [ ] make xfb patching also use new dynamic on-demand patching system?
 	- [ ] make that less error-prone. Completely store/forward pNext?
+- [ ] CommandHook: soft invalidate (don't invalidate state)
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
 - [ ] better deep-matching for handles, especially pipelines
@@ -26,33 +27,39 @@
 				  regions as 0? We want that for the image viewer anyways I guess.
 				  (bind memory destruction is still a problem though, handle
 				  it via tracking and waiting)
+- [ ] shader debugger: better handle input tab, don't invalidate selection
+      every time something is changed (?), make more stable
 - Vertex rework 2: electric boogaloo
 	- [x] make vertex input/output styling consistent
 	      Using buffmt for xfb looks kinda bad, revisit. Also table headers.
 		- [x] Add ID before IDX column?
-	- [ ] add hover data for vertex stuff. With exact formatted scalar
+	- [ ] fix possible alignment issues in record.cpp
 	- [x] Add imgui list clipper to tables and show *whole* captured data again
-	- [ ] figure out upside-down issue with iro. Flip y based on used viewport?
+	- [x] figure out upside-down issue with iro. Flip y based on used viewport?
 	      I guess other games just flip the viewport, that's why they did not need it
-		  {partially solved}
-		- [ ] add "y-up-mode" to options. Can be any of the 3-axis-plus-directions
+		  {solved via heuristic}
+		- [~] add "y-up-mode" to options. Can be any of the 3-axis-plus-directions
 			  by default for vertex input: y-up is y-up (although many models have z-up)
 			  default for vertex output: y-down is y-up (except when viewport is negative,
 			  then y-up is y-up).
-		- [ ] hmm, y-flip isn't that useful atm, should rather be something
-		      like oneMinusY?
-	- [ ] Make vertices selectable. I.e. via mouse click in table
-	      {done only for vertex input/output for now, not RT}
+			  {nope, kept it simple for now}
+		- [~] hmm, y-flip isn't that useful atm, should rather be something
+		      like oneMinusY? {nope}
+	- [x] Make vertices selectable. I.e. via mouse click in table
 	- [ ] show vertex table for RT displayTriangles
 		- [ ] add support for vertex selection
+		- [ ] Make vertices selectable for RT
+	- [x] Draw selected vertex via point
+		- [x] visual: ignore depth for drawn point
+		- [x] visual: color it in some obvious color, red/blue
+	- [x] Allow to select specific vertex (either input or output) in debugger
+	- [x] Fix Recenter for top-level AccelStruct view
+	- [x] Add arcball camera controls (allow both or allow to toggle via ui)
+- vertex quality of life features:
+	- [ ] allow selecting a triangle, highlighting the three points in the table
 	- [ ] displayInstances: allow to give each instance its own color.
 	      Somehow display instances? Allow to select them.
-	- [ ] Draw selected vertex via point {partially done, ugly and has issues}
-		- [ ] visual: ignore depth for drawn point
-		- [ ] visual: color it in some obvious color, red/blue
-		- [ ] visual: make point size variable
-	- [ ] allow selecting a triangle, highlighting the three points in the table
-	- [x] Allow to select specific vertex (either input or output) in debugger
+	- [ ] add hover data for vertex stuff. With exact formatted scalar
 	- [ ] Allow to choose display style
 		- [x] solid (single-colored or shaded) vs wireframe
 		- [x] add simple triangle-normal-based lighting (sh9 based or something)
@@ -63,50 +70,24 @@
 		- [ ] some more shading options? Allow to select a hdri and roughness?
 	- [ ] allow to modify canvas size. I.e. make vertically resizeable
 	- [ ] (low prio) Explicitly allow to modify what is used as position input?
-	- [x] Fix Recenter for top-level AccelStruct view
 	- [ ] Allow to explicitly toggle between perspective and non-perspective projection?
 	- [ ] make perspective heuristic more robust, caused issues in past.
-	- [x] Add arcball camera controls (allow both or allow to toggle via ui)
 	- [ ] later: Make vertex list properly page-able, allow to see *everything*
 	      without random size restrictions
-	    - [ ] For this to properly work with vertex input, we might need an indirect
+	    - [x] For this to properly work with vertex input, we might need an indirect
 		  	  copy (based on indirect draw command and indices.
 			  See vertexCopy.md
 		- [ ] For this to properly work with xfb (vertex output), we potentially
-		      need to implement draw-call splitting. Which will be a pain in the ass.
-- Allow to open where left off?
-  Would require some serialization of frames/commands/resources.
-  Also, would have to completely rework matching to work with those loaded up
-  resources/commands :/ We could *never* compare for equality.
-  But we probably explicitly want that in some cases, normally. So matching
-  would need additional options.
-- Add vertex shaders to shader debugger
-	- [ ] copy vertex buffers in that case in updateHooks
-	- [ ] set up vertex inputs from vertex buffers
-	      Also set up stuff like VertexIndex, InstanceIndex etc.
-		  All the builtin inputs
-	- [ ] handle special vertex shader variables
-	- [ ] important optimization: only copy the resources statically accessed by shader
+		      need to implement draw-call splitting. Which might be a pain in the ass.
 - Really hard-match on vertexCount/indexCount for draw commands?
   See e.g. debug drawing in iro, adding control points to a spline will
   currently unselect the draw command. Not expected behavior.
   Maybe just match with *really* high weight.
-- [ ] shader debugger: add dropdown for all embdeeded sources.
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission
-- [ ] continue shader debugger
-	- [ ] using some lazy copy/cow mechanism.
-	      See cow.md, should probably re-introduce cows
 - [ ] imageViewer: add overlay showing which regions are mapped
       to which memory for sparse images
-- improve vertex viewer
-	- allow to select vertices (/indices)
-		- in input and output viewer
-		- make rows selectable
-		- render the select vertex in viewport, e.g. via point pipe
-			- later: render the selected triangle?
-	- implement paging
 - [ ] investigate 255-overflow-like bug in shader debugger when
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages

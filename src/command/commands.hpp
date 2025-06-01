@@ -490,7 +490,7 @@ struct DrawCmdBase : StateCmdBase {
 	MatchVal doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
-	Pipeline* boundPipe() const override { return state->pipe; }
+	GraphicsPipeline* boundPipe() const override { return state->pipe; }
 
 	virtual bool isIndexed() const = 0;
 

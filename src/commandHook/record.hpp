@@ -21,8 +21,6 @@ struct ShaderCaptureHook;
 // valid throughout its lifetime.
 struct CommandHookRecord {
 	// Associated hook. Might be null if this was invalidated
-	// TODO: we don't really need this, can just use dev->commandHook.
-	CommandHook* hook {};
 	CommandRecord* record {}; // the record we hook. Always valid.
 	LocalCapture* localCapture {}; // when this was hooked for a local capture
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
@@ -30,6 +28,7 @@ struct CommandHookRecord {
 	// selected command and this HookRecord just exists for accelStructs
 	std::vector<const Command*> hcommand;
 	float match {}; // how much the original command matched the searched one
+	bool invalid {}; // if this was invalidated (e.g. by a hook update)
 
 	// When there is currently a (hook) submission using this record,
 	// it is stored here. Synchronized via device mutex.
@@ -159,9 +158,12 @@ public:
 	// if we need to perform custom commands, e.g. for accelStruct building.
 	bool hasHookedCmd() const { return !hcommand.empty(); }
 
+	CommandHook& commandHook() const;
+
 private:
 	struct RecordInfo {
 		const CommandHookOps& ops;
+		const CommandHookHints& hints;
 
 		bool splitRendering {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
@@ -219,6 +221,8 @@ private:
 
 	void hookBefore(const BuildAccelStructsCmd&);
 	void hookBefore(const BuildAccelStructsIndirectCmd&);
+
+	u32 vertexCountHint(const DrawCmdBase& cmd, const RecordInfo& info) const;
 
 	// TODO: kinda arbitrary, allow more. Configurable via settings?
 	// In general, the problem is that we can't know the relevant
