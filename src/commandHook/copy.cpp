@@ -184,7 +184,7 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		return false;
 	}
 
-	if(ici.samples > fmtProps.sampleCounts) {
+	if(u32(ici.samples) > fmtProps.sampleCounts) {
 		dlg_warn("CopiedImage: max supported samples {} (needing {})",
 			fmtProps.sampleCounts, samples);
 		return false;
