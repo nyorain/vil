@@ -1796,8 +1796,8 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const BindIndexBufferCmd& cmd) override { f(cmd); }
 	void visit(const BindPipelineCmd& cmd) override { f(cmd); }
 	void visit(const BindDescriptorSetCmd& cmd) override { f(cmd); }
-	void visit(const SetScissorCmd& cmd) { f(cmd); }
-	void visit(const SetViewportCmd& cmd) { f(cmd); }
+	void visit(const SetScissorCmd& cmd) override { f(cmd); }
+	void visit(const SetViewportCmd& cmd) override { f(cmd); }
 	void visit(const SetLineWidthCmd& cmd) override { f(cmd); }
 	void visit(const SetDepthBiasCmd& cmd) override { f(cmd); }
 	void visit(const SetDepthBoundsCmd& cmd) override { f(cmd); }
