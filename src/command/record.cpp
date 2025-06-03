@@ -93,6 +93,7 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 		// anymore at the moment.
 		if(state.pipe && !compatibleForSetN(*state.pipe->layout,
 				*bds.layout, i)) {
+			dlg_info("incompatible set {}", i);
 			break;
 		}
 
@@ -243,5 +244,17 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 
 UsedImage::UsedImage(LinAllocator& alloc) noexcept :
 	RefHandle<Image>(alloc), layoutChanges(alloc) {}
+
+span<const VkViewport> viewports(const GraphicsState& state) {
+	if(!state.pipe) {
+		return state.dynamic.viewports;
+	}
+
+	if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
+		return state.dynamic.viewports;
+	}
+
+	return state.pipe->viewports;
+}
 
 } // namespace vil

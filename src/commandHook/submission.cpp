@@ -24,8 +24,7 @@ CommandHookSubmission::~CommandHookSubmission() {
 		dlg_assert(record->record);
 		record->writer = nullptr;
 
-		// hook was invalidated, record should be deleted
-		if(!record->hook) {
+		if(record->invalid) {
 			record->writer = nullptr;
 			dlg_assert(!contains(record->record->hookRecords, record));
 			delete record;
@@ -57,7 +56,8 @@ void CommandHookSubmission::activate() {
 			// This cannot really be optimized though. At this point in time we might
 			// not know the current TLAS instances and we do not want to capture the BLASes
 			// at any later time since they might have been invalidated then already.
-			dstCapture.blases = captureBLASesLocked(*record->hook->dev_);
+			auto& hook = record->commandHook();
+			dstCapture.blases = captureBLASesLocked(*hook.dev_);
 		}
 	}
 }
@@ -69,7 +69,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	// In this case the hook was invalidated, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.
-	if(!record->hook) {
+	if(record->invalid) {
 		finishAccelStructBuilds();
 
 		record->writer = nullptr;
@@ -88,14 +88,35 @@ void CommandHookSubmission::finish(Submission& subm) {
 		return;
 	}
 
-	assertOwned(record->hook->dev_->mutex);
+	// === debug ====
+	/*
+	if(record->shaderTable.buf) {
+		dlg_assert(record->shaderCapture);
+
+		dlg_trace("shaderTable content");
+		auto data = record->shaderTable.data();
+
+		while(data.size() >= 64u) {
+			std::string str;
+			for(auto i = 0u; i < 16; ++i) {
+				str += dlg::format("{}{} ", std::hex, read<u32>(data));
+			}
+
+			dlg_trace(" >> {}", str);
+		}
+	}
+	*/
+	// === /debug ====
+
+	assertOwned(record->record->dev->mutex);
 	transmitTiming();
 
 	// This usually is a sign of a problem somewhere inside the layer.
 	// Either we are not correctly clearing completed states from the gui
 	// but still producing new ones or we have just *waaay* to many
 	// candidates and should somehow improve matching for this case.
-	dlg_assertlm(dlg_level_warn, record->hook->completed_.size() < 64,
+	auto& hook = record->commandHook();
+	dlg_assertlm(dlg_level_warn, hook.completed_.size() < 64,
 		"High number of hook states detected");
 
 	// indirect command readback
@@ -144,18 +165,68 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 	finishAccelStructBuilds();
 
+	// update vertex hints
+	auto& hints = hook.hintsLocked();
+	auto& ops = hook.opsLocked();
+	if(!record->localCapture && (ops.copyVertexInput || ops.copyXfb)) {
+		auto& bcmd = *record->hcommand.back();
+
+		ReadBuf span {};
+		bool indexed {};
+		if(auto* cmd = commandCast<const DrawIndirectCountCmd*>(&bcmd)) {
+			auto& ic = record->state->indirectCopy;
+			span = ic.data().subspan(4u);
+			indexed = cmd->isIndexed();
+		} else if(auto* cmd = commandCast<const DrawIndirectCmd*>(&bcmd)) {
+			auto& ic = record->state->indirectCopy;
+			span = ic.data();
+			indexed = cmd->isIndexed();
+		}
+
+		auto changed = false;
+		if(!span.empty()) {
+			if(indexed) {
+				skip(span, sizeof(VkDrawIndexedIndirectCommand) * ops.vertexInputCmd);
+				auto cmd = read<VkDrawIndexedIndirectCommand>(span);
+				changed |= max(hints.indexCountHint, cmd.indexCount);
+				changed |= max(hints.instanceCountHint, cmd.instanceCount);
+			} else {
+				skip(span, sizeof(VkDrawIndirectCommand) * ops.vertexInputCmd);
+				auto cmd = read<VkDrawIndirectCommand>(span);
+				changed |= max(hints.vertexCountHint, cmd.vertexCount);
+				changed |= max(hints.instanceCountHint, cmd.instanceCount);
+			}
+		}
+
+		// make sure to hook new records with better hints
+		if(changed) {
+			dlg_info("increasing hint size; invalidating records");
+
+			hook.invalidateRecordingsLocked();
+			// TODO: just invalidate instead?
+			hook.keepAliveLC_.insert(hook.keepAliveLC_.end(),
+				std::make_move_iterator(hook.completed_.begin()),
+				std::make_move_iterator(hook.completed_.end()));
+			hook.completed_.clear();
+
+			// important that we don't insert this state into the
+			// list of completed submissions
+			return;
+		}
+	}
+
 	CompletedHook* dstCompleted {};
 	if(record->localCapture) {
 		if(record->localCapture->flags & LocalCaptureBits::once) {
 			dlg_assert(!record->localCapture->completed.state);
 
-			auto& lcs = record->hook->localCaptures_;
+			auto& lcs = hook.localCaptures_;
 			auto finder = [&](auto& ptr){ return ptr.get() == record->localCapture; };
 			auto it = find_if(lcs, finder);
 			dlg_assert(it != lcs.end());
 			auto ptr = std::move(*it);
 			lcs.erase(it);
-			record->hook->localCapturesCompleted_.push_back(std::move(ptr));
+			hook.localCapturesCompleted_.push_back(std::move(ptr));
 
 			dlg_trace("completed local capture (first) '{}'", record->localCapture->name);
 		}
@@ -165,14 +236,14 @@ void CommandHookSubmission::finish(Submission& subm) {
 			// here (intrusivePtr) since the device mutex is locked.
 			// Maybe just change that?
 			dlg_assert(record->localCapture->completed.record);
-			record->hook->keepAliveLC_.push_back(std::move(record->localCapture->completed));
+			hook.keepAliveLC_.push_back(std::move(record->localCapture->completed));
 
 			dlg_trace("updating local capture state '{}'", record->localCapture->name);
 		}
 
 		dstCompleted = &record->localCapture->completed;
 	} else {
-		dstCompleted = &record->hook->completed_.emplace_back();
+		dstCompleted = &hook.completed_.emplace_back();
 	}
 
 	dstCompleted->record = IntrusivePtr<CommandRecord>(record->record);
@@ -185,8 +256,8 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 void CommandHookSubmission::transmitTiming() {
 	ZoneScoped;
-
 	auto& dev = *record->record->dev;
+
 	if(!record->queryPool) {
 		// We didn't query the time or the query pool couldn't be created.
 		// Latter could be the case when the queue does not support
@@ -213,6 +284,36 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
+
+	// debug timing
+#ifdef VIL_DEBUG
+	auto timingCounts = record->ownTimingNames.size();
+	if(timingCounts) {
+		u64 data[CommandHookRecord::maxDebugTimings];
+		dlg_assert(timingCounts <= CommandHookRecord::maxDebugTimings);
+		res = dev.dispatch.GetQueryPoolResults(dev.handle, record->queryPool,
+			2, timingCounts, sizeof(data), data, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+		if(res != VK_SUCCESS) {
+			dlg_error("GetQueryPoolResults failed: {}", res);
+			return;
+		}
+
+		auto last = data[0];
+		dlg_trace("== debug timings ==");
+		for(auto [i, name] : enumerate(record->ownTimingNames)) {
+			if(i == 0u) {
+				continue;
+			}
+
+			auto diff = data[i] - last;
+			auto diffMS = dev.props.limits.timestampPeriod * diff / (1000.f * 1000.f);
+			dlg_trace("  {}: {} ms", name, diffMS);
+
+			last = data[i];
+		}
+	}
+#endif // VIL_DEBUG
+
 }
 
 void CommandHookSubmission::finishAccelStructBuilds() {

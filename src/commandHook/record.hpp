@@ -4,8 +4,12 @@
 #include <util/ownbuf.hpp>
 #include <command/record.hpp>
 #include <commandHook/state.hpp>
+#include <vkutil/dynds.hpp>
+#include <variant>
 
 namespace vil {
+
+struct ShaderCaptureHook;
 
 // Internal representation of a hooked recording of a CommandRecord.
 // Is kept alive only as long as the associated Record is referencing this
@@ -17,8 +21,6 @@ namespace vil {
 // valid throughout its lifetime.
 struct CommandHookRecord {
 	// Associated hook. Might be null if this was invalidated
-	// TODO: we don't really need this, can just use dev->commandHook.
-	CommandHook* hook {};
 	CommandRecord* record {}; // the record we hook. Always valid.
 	LocalCapture* localCapture {}; // when this was hooked for a local capture
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
@@ -26,6 +28,7 @@ struct CommandHookRecord {
 	// selected command and this HookRecord just exists for accelStructs
 	std::vector<const Command*> hcommand;
 	float match {}; // how much the original command matched the searched one
+	bool invalid {}; // if this was invalidated (e.g. by a hook update)
 
 	// When there is currently a (hook) submission using this record,
 	// it is stored here. Synchronized via device mutex.
@@ -54,8 +57,14 @@ struct CommandHookRecord {
 	VkRenderPass rp1 {};
 	VkRenderPass rp2 {};
 
+	IntrusivePtr<ShaderCaptureHook> shaderCapture {}; // keep alive
+
 	IntrusivePtr<CommandHookState> state {};
 	OwnBuffer dummyBuf {};
+
+	// For capturing shader table from ray tracing shaders with patched
+	// shaders, we need to create a hooked shaderTable.
+	OwnBuffer shaderTable {};
 
 	// AccelStruct-related stuff.
 	// We need to hook every CmdBuildAccelerationStructure, making sure
@@ -96,9 +105,41 @@ struct CommandHookRecord {
 	std::vector<VkImageView> imageViews;
 	std::vector<VkBufferView> bufferViews;
 
+	std::vector<vku::DynDs> dynds;
+
+	static constexpr auto maxDebugTimings = 10u;
+	VIL_DEBUG_ONLY(std::vector<std::string> ownTimingNames;)
+
 	// Linked list of all records belonging to this->hook
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
+
+	// application handles that we use in inserted GPU commands that might
+	// be destroyed by the application. Mainly relevant for update_unused_while_pending descriptors.
+	std::vector<const Handle*> usedHandles;
+
+public:
+	// see vertexCopy.glsl
+	// must match it!
+	struct VertexCopyMetadata {
+		u32 dispatchPerVertexX;
+		u32 dispatchPerVertexY;
+		u32 dispatchPerVertexZ;
+		u32 firstVertex;
+
+		u32 dispatchPerInstanceX;
+		u32 dispatchPerInstanceY;
+		u32 dispatchPerInstanceZ;
+		u32 firstInstance;
+
+		u32 indexCount;
+		u32 minIndex;
+		u32 maxIndex;
+		u32 copyTypeOrIndexOffset;
+	};
+
+	static constexpr auto copyTypeVertices = 1u;
+	static constexpr auto copyTypeResolveIndices = 2u;
 
 public:
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
@@ -117,9 +158,12 @@ public:
 	// if we need to perform custom commands, e.g. for accelStruct building.
 	bool hasHookedCmd() const { return !hcommand.empty(); }
 
+	CommandHook& commandHook() const;
+
 private:
 	struct RecordInfo {
 		const CommandHookOps& ops;
+		const CommandHookHints& hints;
 
 		bool splitRendering {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
@@ -145,6 +189,7 @@ private:
 	// Called when we arrived ath the hooked command itself. Will make sure
 	// all barriers are set, render passes split correclty and copies are done.
 	void hookRecordDst(Command& dst, RecordInfo&);
+	void hookRecordDstHookShaderTable(Command& dst, RecordInfo&);
 
 	// Called immediately before recording the hooked command itself.
 	// Will perform all needed operations.
@@ -167,6 +212,7 @@ private:
 		const DescriptorCopyOp&, unsigned copyDstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
+	void copyVertexInput(Command& bcmd, RecordInfo&);
 	void copyAttachment(const Command& bcmd, const RecordInfo&,
 		AttachmentType type, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
@@ -175,6 +221,8 @@ private:
 
 	void hookBefore(const BuildAccelStructsCmd&);
 	void hookBefore(const BuildAccelStructsIndirectCmd&);
+
+	u32 vertexCountHint(const DrawCmdBase& cmd, const RecordInfo& info) const;
 
 	// TODO: kinda arbitrary, allow more. Configurable via settings?
 	// In general, the problem is that we can't know the relevant

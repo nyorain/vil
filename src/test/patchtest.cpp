@@ -1,9 +1,7 @@
 #include <numeric>
-#undef SPIRV_CROSS_NAMESPACE_OVERRIDE
-
-#include "spirv_cross_parsed_ir.hpp"
-#include "spirv_parser.hpp"
-#include "spirv_cross.hpp"
+#include <spirv_cross_parsed_ir.hpp>
+#include <spirv_parser.hpp>
+#include <spirv_cross.hpp>
 #include <cstdio>
 #include <cassert>
 #include <cerrno>
@@ -14,12 +12,6 @@
 #include <nytl/span.hpp>
 #include <util/buffmt.hpp>
 #include <util/linalloc.hpp>
-
-namespace spvc {
-	using namespace spirv_cross;
-}
-
-#define spc spvc
 
 using namespace nytl;
 
@@ -266,7 +258,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			}
 
 			auto& mdst = dst.members[i];
-			mdst.type = buildType(compiler, memTypeID, alloc, deco);
+			mdst.type = ::buildType(compiler, memTypeID, alloc, deco);
 			mdst.name = copy(alloc, name);
 			mdst.offset = off;
 
@@ -323,7 +315,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		LinAllocator& alloc) {
-	return buildType(compiler, typeID, alloc, nullptr);
+	return ::buildType(compiler, typeID, alloc, nullptr);
 }
 
 unsigned size(const Type& t, BufferLayout bl) {
@@ -443,17 +435,28 @@ void outputPatched(spc::ParsedIR& ir, u32 file, u32 line) {
 			continue;
 		}
 
+		// TODO WIP
+		if(var.debugLocalVariables.empty()) {
+			continue;
+		}
+
 		auto& dstMember = members.emplace_back();
-		auto* dstType = buildType(compiler, var.basetype, alloc);
+		auto* dstType = ::buildType(compiler, var.basetype, alloc);
 		dstMember.type = dstType;
-		dstMember.name = ir.get_name(varID);
 		dstMember.offset = offset;
+
+		if(var.debugLocalVariables.empty()) {
+			dstMember.name = ir.get_name(varID);
+		} else {
+			auto& lvar = ir.get<spc::SPIRDebugLocalVariable>(var.debugLocalVariables.front());
+			dstMember.name = ir.get<spc::SPIRString>(lvar.nameID).str;
+		}
 
 		auto dstSize = ::size(*dstType, bufLayout);
 
-		printf(" >> %d (%d x %d): var %s: size %d\n",
-			int(varID), int(dstType->type), dstType->vecsize,
-			ir.get_name(varID).c_str(), dstSize);
+		printf(" >> %d (%d, %d x %d): var %s: size %d\n",
+			int(varID), int(dstType->type), dstType->vecsize, dstType->columns,
+			std::string(dstMember.name).c_str(), dstSize);
 
 		// NOTE: not sure if this always works. (array?)
 		// Could re-declare them from scratch instead.
@@ -463,6 +466,8 @@ void outputPatched(spc::ParsedIR& ir, u32 file, u32 line) {
 		memberOffsets.push_back(offset);
 
 		offset += dstSize;
+		// TODO: less conservative alignment, save space!
+		offset = vil::align(offset, 16u);
 	}
 
 	// declare that struct type in spirv [patch]
@@ -621,13 +626,30 @@ void outputPatched(spc::ParsedIR& ir, u32 file, u32 line) {
 }
 
 int main(int argc, const char** argv) {
-	assert(argc > 1);
+	assert(argc > 3);
 	std::vector<u32> spirv = readFile<std::vector<u32>>(argv[1], true);
 
 	spc::Parser parser(std::move(spirv));
 	parser.parse();
 	auto& ir = parser.get_parsed_ir();
 
-	outputPatched(ir, 0, 20);
+	for(auto& source : ir.sources) {
+		if(source.sourceID == 0u) {
+			continue;
+		}
+
+		auto& str = ir.get<spc::SPIRString>(source.sourceID);
+		printf("source, %d markers: %s\n", int(source.line_markers.size()),
+			str.str.c_str());
+
+		for(auto& marker : source.line_markers) {
+			printf(">> marker %d %d\n", marker.line, marker.col);
+		}
+	}
+
+	auto fileID = std::stoi(argv[2]);
+	auto lineID = std::stoi(argv[3]);
+
+	outputPatched(ir, fileID, lineID);
 }
 

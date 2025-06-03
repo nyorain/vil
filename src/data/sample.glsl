@@ -24,9 +24,9 @@
 #endif
 
 // for linting in editor
-#if !defined(TEX_TYPE_1D_ARRAY) && !defined(TEX_TYPE_2D_ARRAY) && !defined(TEX_TYPE_3D)
-	#define TEX_TYPE_2D_ARRAY
-#endif
+// #if !defined(TEX_TYPE_1D_ARRAY) && !defined(TEX_TYPE_2D_ARRAY) && !defined(TEX_TYPE_3D) && !defined(TEX_TYPE_2D_MS_ARRAY)
+	// #define TEX_TYPE_2D_ARRAY
+// #endif
 
 #ifdef TEX_TYPE_1D_ARRAY
 	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(1DArray) sTexture;
@@ -65,6 +65,33 @@
 
 	ivec3 texSize(int level) {
 		return textureSize(sTexture, level);
+	}
+#elif defined(TEX_TYPE_2D_MS_ARRAY)
+	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(2DMSArray) sTexture;
+
+	// GLSL does not allow us specify the level for MS images :(
+	// We use this field to specify the sample instead, handled in gui.cpp
+	RawVec4Type fetchTexRaw(ivec3 coords, int level) {
+		const int sampleID = level;
+		return texelFetch(sTexture, coords, sampleID);
+	}
+
+	vec4 fetchTex(ivec3 coords, int level) {
+		const int sampleID = level;
+		return texelFetch(sTexture, coords, sampleID);
+	}
+
+	ivec3 texSize(int level) {
+		// level is ignored
+		return textureSize(sTexture);
+	}
+
+	// GLSL does not allow sampling MS images, we use fetch instead.
+	// TODO: interpolate manually?
+	vec4 sampleTex(vec3 coords, float level) {
+		const int sampleID = int(level);
+		coords.xy *= texSize(0).xy;
+		return fetchTex(ivec3(coords), sampleID);
 	}
 #elif defined(TEX_TYPE_3D)
 	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(3D) sTexture;

@@ -703,9 +703,9 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 					} else {
 						auto samplerMatch = match(mt, bindA.sampler, bindB.sampler);
 						if(noMatch(samplerMatch)) {
-							add(combined, samplerMatch);
-						} else {
 							combined.total += 1.f;
+						} else {
+							add(combined, samplerMatch);
 						}
 					}
 				}
@@ -717,9 +717,9 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 					} else {
 						auto viewMatch = match(mt, bindA.imageView, bindB.imageView);
 						if(noMatch(viewMatch)) {
-							add(combined, viewMatch);
-						} else {
 							combined.total += 1.f;
+						} else {
+							add(combined, viewMatch);
 						}
 					}
 				}
@@ -735,7 +735,7 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 				auto& bindB = bindingsB[e];
 
 				auto bufMatch = match(mt, bindA.buffer, bindB.buffer);
-				if(!noMatch(m)) {
+				if(!noMatch(bufMatch)) {
 					add(bufMatch, bindA.offset, bindB.offset, 0.1);
 					add(bufMatch, bindA.range, bindB.range);
 					m.match += eval(bufMatch);
@@ -803,18 +803,29 @@ void add(MatchVal& m, MatchType mt,
 
 	addMatch(a.numTotalCommands, b.numTotalCommands);
 
-	// every pipeline match counts like N commands
-	const auto pipeWeight = 10.f;
-	m.total += pipeWeight * std::max(a.numPipeBinds, b.numPipeBinds);
+	const auto maxPipes = std::max(a.numPipeBinds, b.numPipeBinds);
 
-	// TODO PERF might be too expensive
-	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
-		float bestMatch = 0.f;
-		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
-			auto pipeMatch = match(mt, pipeA->pipe, pipeB->pipe);
-			bestMatch = std::max(bestMatch, eval(pipeMatch));
+	// quadratic complexity below, only do for small number of pipe binds.
+	// TODO: use LMM for pipes, should help a little.
+	constexpr auto maxMatchCount = 15u; 
+	if(maxPipes < maxMatchCount) {
+		// every pipeline match counts like N commands
+		constexpr auto pipeWeight = 10.f;
+		m.total += pipeWeight * maxPipes;
+
+		// TODO PERF might be too expensive
+		for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
+			float bestMatch = 0.f;
+			for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
+				auto pipeMatch = match(mt, pipeA->pipe, pipeB->pipe);
+				bestMatch = std::max(bestMatch, eval(pipeMatch));
+			}
+			m.match += pipeWeight * bestMatch;
 		}
-		m.match += bestMatch;
+	} else if (maxPipes > 0) {
+		constexpr auto countWeight = 5;
+		m.match += countWeight * std::min(a.numPipeBinds, b.numPipeBinds) / maxPipes;
+		m.total += countWeight;
 	}
 }
 
@@ -1649,13 +1660,13 @@ MatchVal matchState(MatchType matchType, const StateCmdBase& a, const StateCmdBa
 			return MatchVal::noMatch());
 
 	for(auto& pcr : a.boundPipe()->layout->pushConstants) {
-		// TODO: these asserts can trigger if parts of the push constant
+		// this can happen if parts of the push constant
 		// range was left undefined. It might not be used by the shader
 		// anyways. Not sure how to fix.
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= a.boundPushConstants().data.size(), continue);
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= b.boundPushConstants().data.size(), continue);
+		if(pcr.offset + pcr.size > a.boundPushConstants().data.size() ||
+				pcr.offset + pcr.size > b.boundPushConstants().data.size()) {
+			continue;
+		}
 
 		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
 		m.total += pcrWeight;

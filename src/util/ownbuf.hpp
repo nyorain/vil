@@ -33,6 +33,7 @@ struct OwnBuffer {
 	void invalidateMap();
 	void flushMap();
 	ReadBuf data() const { return {map, size}; }
+	WriteBuf writeData() const { return {map, size}; }
 
 	OwnBuffer() = default;
 	~OwnBuffer();
@@ -45,6 +46,8 @@ struct OwnBuffer {
 
 	vku::BufferSpan asSpan(VkDeviceSize offset = 0u, VkDeviceSize size = VK_WHOLE_SIZE) const;
 	explicit operator vku::BufferSpan() const { return asSpan(); }
+
+	VkDeviceAddress queryAddress() const;
 
 	friend void swap(OwnBuffer& a, OwnBuffer& b) noexcept;
 };

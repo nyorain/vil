@@ -484,7 +484,8 @@ extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 
 		iv.select(vilImg->handle, vilImg->ci.extent, vilImg->ci.imageType,
 			vilImg->ci.format, subres, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, flags);
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_SAMPLE_COUNT_1_BIT,
+			flags);
 
 		vilDev->window->allowClose = true;
 		vilDev->window->doMainLoop();

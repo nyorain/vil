@@ -1,8 +1,10 @@
 # needed shaders
 spv = []
 glslang = find_program('glslangValidator', required: false)
+# glslc = find_program('glslc', required: false)
 
 if glslang.found()
+# if glslc.found()
 	imgtable = {
 		'1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_FLOAT'],
 		'u1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_UINT'],
@@ -12,9 +14,28 @@ if glslang.found()
 		'u2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_UINT'],
 		'i2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_INT'],
 
+		'2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_FLOAT'],
+		'u2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_UINT'],
+		'i2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_INT'],
+
 		'3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_FLOAT'],
 		'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
 		'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
+	}
+
+	idxtable = {
+		'idx16.': ['-DIndexType=u16'],
+		'idx32.': ['-DIndexType=uint'],
+	}
+	idxVertTable = {
+		'vert8.idx16.': ['-DIndexType=u16', '-DVertexType=u8'],
+		'vert32.idx16.': ['-DIndexType=u16', '-DVertexType=uint'],
+		'vert8.idx32.': ['-DIndexType=uint', '-DVertexType=u8'],
+		'vert32.idx32.': ['-DIndexType=uint', '-DVertexType=uint'],
+	}
+	countbuftable = {
+		'': [],
+		'count.': ['-DCOUNT_BUF'],
 	}
 
 	texelstore_table = imgtable
@@ -43,6 +64,8 @@ if glslang.found()
 		'blur.comp': {'': [] },
 		# accelStruct building
 		'accelStructVertices.comp': {'': [] },
+		# shader table patching for shader capture debugging
+		'shaderTable.comp': {'': [] },
 		# image analyze shaders
 		'histogram.comp': imgtable,
 		'minmax.comp': imgtable,
@@ -54,27 +77,51 @@ if glslang.found()
 		'histogramPrepare.comp': {'': [] },
 		'histogram.vert': {'': [] },
 		'histogram.frag': {'': [] },
+		# indirect vertex copy
+		'writeVertexCmd.comp': countbuftable,
+		'writeIndexCmd.comp': countbuftable,
+		'processIndices.comp': idxtable,
+		'writeVertexCmdIndexed.comp': {'': [] },
+		'copyVertices.comp': idxVertTable,
 	}
 
 	glslang_version_info = run_command(glslang, '--version', check: true).stdout()
 	glslang_version = glslang_version_info.split('\n')[0].split(':')[-1]
+	includes = files('vertexCopy.glsl')
 
 	foreach file, configs : overlay_shaders
 		foreach name, config : configs
 			varname = file.underscorify() + '_' + name.underscorify() + 'spv_data'
-			outname = file + '.' + name + 'spv.h'
 
-			args = [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@']
+			# TODO: should compile with optimization but default glslang
+			# on arch does not come with optimizer linked in :(
+			args = [glslang, '-V', config, '@INPUT@']
+
+			args += ['-o', '@OUTPUT@']
+			args += ['--target-env', 'vulkan1.1']
 
 			if glslang_version.version_compare('>=11.0.0')
 				args += '--quiet'
 			endif
 
+			# Useful for inspecting binary spv
+			debug_bin = false
+			if debug_bin
+				outname = file + '.' + name + 'spv'
+			else
+				outname = file + '.' + name + 'spv.h'
+				args += ['--vn', varname]
+			endif
+
+			# meh, glslc produces shitty c headers, would need to change include workflow
+			# args = [glslc, '-mfmt=c', config, '-O', '-o', '@OUTPUT@', '@INPUT@']
+
 			spv += custom_target(
 				outname,
 				input: files(file),
 				output: outname,
-				command: args)
+				command: args,
+				depend_files: includes)
 		endforeach
 	endforeach
 

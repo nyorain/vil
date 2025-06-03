@@ -2,7 +2,9 @@
 
 #include <fwd.hpp>
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <util/dlg.hpp>
+#include <nytl/stringParam.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <string>
@@ -195,6 +197,47 @@ inline bool toggleButtonFlags(const char* label, T& flags, E val,
 	}
 
 	return ret;
+}
+
+struct TableColDesc {
+	nytl::StringParam name {};
+	u32 flags {};
+	float width {};
+};
+
+template<typename... Args>
+void imGuiTable(nytl::StringParam name, span<const TableColDesc> cols,
+		span<const std::tuple<Args...>> args,
+		ImGuiTableFlags flags = 0, const ImVec2& outer_size = ImVec2(0.0f, 0.0f),
+		float inner_width = 0.0f) {
+	constexpr auto numCols = sizeof...(Args);
+	dlg_assert(cols.size() == numCols);
+	if(!ImGui::BeginTable(name.c_str(), numCols, flags, outer_size, inner_width)) {
+		return;
+	}
+
+	for(auto& col : cols) {
+		ImGui::TableSetupColumn(col.name.c_str(), col.flags, col.width);
+	}
+
+	ImGui::TableNextRow();
+
+	for(auto& line : args) {
+		for(auto& col : line) {
+			ImGui::TableNextColumn();
+			imGuiText("{}", col);
+		}
+
+		ImGui::TableNextRow();
+	}
+
+	ImGui::EndTable();
+}
+
+inline void imGuiSameLineSep() {
+	ImGui::SameLine();
+	ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+	ImGui::SameLine();
 }
 
 } // namesapce vil
