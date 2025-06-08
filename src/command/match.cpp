@@ -807,7 +807,7 @@ void add(MatchVal& m, MatchType mt,
 
 	// quadratic complexity below, only do for small number of pipe binds.
 	// TODO: use LMM for pipes, should help a little.
-	constexpr auto maxMatchCount = 15u; 
+	constexpr auto maxMatchCount = 15u;
 	if(maxPipes < maxMatchCount) {
 		// every pipeline match counts like N commands
 		constexpr auto pipeWeight = 10.f;
@@ -1245,7 +1245,7 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 			// TODO: only consider descriptors statically used by pipeline
 			// NOTE: the `min(dsCount, ...)` is used defensively here to
 			//   account for extensions that mess with bound-descriptor
-			//   requirements, e.g. push descriptors.
+			//   requirements
 			auto* dstCmd = dynamic_cast<const StateCmdBase*>(dst[0]);
 			dlg_assert_or(dstCmd, continue);
 
@@ -1263,6 +1263,8 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 			auto dsCount = dstPipe->layout->descriptors.size();
 			auto srcBound = srcDescriptors.first(std::min(dsCount, srcDescriptors.size()));
 			auto dstBound = dstDescriptors.first(std::min(dsCount, dstDescriptors.size()));
+
+			// TODO: consider push descriptors
 
 			if(!dstBound.empty() || !srcBound.empty()) {
 				// TODO: consider dynamic offsets?

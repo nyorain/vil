@@ -84,8 +84,6 @@ void debugStatSub(std::atomic<T>& dst, const O& val) {
 #endif // VIL_DEBUG_STATS
 }
 
-// Returns the total raw memory size needed by descriptor state of
-// the given layout, with the given variable descriptor count.
 size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
 	if(layout.bindings.empty()) {
 		return 0;

@@ -1017,6 +1017,46 @@ VkResult doCreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.GetDescriptorSetLayoutSupport,
 		&dev.dispatch.GetDescriptorSetLayoutSupportKHR});
+	// VK_KHR_maintenance5, vulkan 1.4
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBindIndexBuffer2,
+		&dev.dispatch.CmdBindIndexBuffer2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.GetImageSubresourceLayout2,
+		&dev.dispatch.GetImageSubresourceLayout2KHR,
+		&dev.dispatch.GetImageSubresourceLayout2EXT});
+	// VK_KHR_map_memory2, vulkan 1.4
+	aliasCmd(std::array{
+		&dev.dispatch.MapMemory2,
+		&dev.dispatch.MapMemory2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.UnmapMemory2,
+		&dev.dispatch.UnmapMemory2KHR});
+	// VK_KHR_line_rasterization, vulkan 1.4
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetLineStipple,
+		&dev.dispatch.CmdSetLineStippleKHR,
+		&dev.dispatch.CmdSetLineStippleEXT});
+	// VK_KHR_push_descriptor, vulkan 1.4
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPushDescriptorSet,
+		&dev.dispatch.CmdPushDescriptorSetKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPushDescriptorSetWithTemplate,
+		&dev.dispatch.CmdPushDescriptorSetWithTemplateKHR});
+	// maintenance6 (without descriptor buffer functionality)
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPushDescriptorSet2,
+		&dev.dispatch.CmdPushDescriptorSet2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPushDescriptorSetWithTemplate2,
+		&dev.dispatch.CmdPushDescriptorSetWithTemplate2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPushConstants2,
+		&dev.dispatch.CmdPushConstants2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBindDescriptorSets2,
+		&dev.dispatch.CmdBindDescriptorSets2KHR});
 
 	// find vkSetDeviceLoaderData callback
 	if(standalone) {

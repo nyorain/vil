@@ -127,6 +127,13 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(const ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
 
+struct ShaderObject : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SHADER_EXT;
+
+	VkShaderEXT handle {};
+	std::vector<IntrusivePtr<DescriptorSetLayout>> dsLayouts;
+};
+
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
     VkDevice                                    device,
@@ -138,5 +145,24 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
     VkDevice                                    device,
     VkShaderModule                              shaderModule,
     const VkAllocationCallbacks*                pAllocator);
+
+// VK_EXT_shader_object
+VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
+    VkDevice                                    device,
+    uint32_t                                    createInfoCount,
+    const VkShaderCreateInfoEXT*                pCreateInfos,
+    const VkAllocationCallbacks*                pAllocator,
+    VkShaderEXT*                                pShaders);
+
+VKAPI_ATTR void VKAPI_CALL DestroyShaderEXT(
+    VkDevice                                    device,
+    VkShaderEXT                                 shader,
+    const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(
+    VkDevice                                    device,
+    VkShaderEXT                                 shader,
+    size_t*                                     pDataSize,
+    void*                                       pData);
 
 } // namespace vil

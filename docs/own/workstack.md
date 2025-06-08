@@ -108,6 +108,24 @@
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
 
+- [ ] support 1.4 core
+- [ ] support VK_KHR_maintenance{5, 6} (new CmdBind calls)
+- [ ] support VK_EXT_mesh_shader
+	- [ ] capture vertex input via shader patching?
+- [ ] properly support VK_EXT_shader_object
+	- [ ] remove StateCmdBase::boundPipe()
+	      Instead, introduce a ShaderState
+struct ShaderStage {
+	VkShaderStageFlagBits stage;
+	ShaderObject* shader;
+};
+
+ShaderState {
+	span<ShaderStage> stages;
+	Pipeline* pipe; // optional
+};
+
+
 low prio:
 - [ ] cleanup imageToBuffer implementation
       {NOTE: a lot better already, mainly just missing the blit implementation.

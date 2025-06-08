@@ -32,6 +32,7 @@ DefHandleDesc(VkPipelineLayout, PipelineLayout, pipeLayouts, false, true);
 DefHandleDesc(VkAccelerationStructureKHR, AccelStruct, accelStructs, false, true);
 DefHandleDesc(VkImage, Image, images, false, true);
 DefHandleDesc(VkPipeline, Pipeline, pipes, false, true);
+DefHandleDesc(VkShaderEXT, ShaderObject, shaderObjects, false, true);
 
 DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
 DefHandleDesc(VkEvent, Event, events, false, true);

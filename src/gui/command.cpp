@@ -486,17 +486,20 @@ void CommandViewer::displayDsList() {
 	// TODO: make runtime setting?
 	// whether to notify of unbound descriptor sets
 	static constexpr auto showUnboundSets = true;
+	static constexpr auto showIncompatibleSets = true;
+	static constexpr auto showUncapturedSets = true;
 
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	auto toplevelFlags = ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth;
 	if(ImGui::TreeNodeEx("Descriptors", toplevelFlags)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		auto size = std::min(dss.size(), cmd->boundPipe()->layout->descriptors.size());
+		auto& pipeLayout = *cmd->boundPipe()->layout;
+		auto size = std::min(dss.size(), pipeLayout.descriptors.size());
 		for(auto setID = 0u; setID < size; ++setID) {
 			auto& ds = dss[setID];
 
 			// No descriptor set bound
-			if(!ds.dsEntry) {
+			if(!ds.layout) {
 				if(showUnboundSets) {
 					auto label = dlg::format("Descriptor Set {}: unbound", setID);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
@@ -508,7 +511,7 @@ void CommandViewer::displayDsList() {
 
 					if(ImGui::IsItemHovered()) {
 						ImGui::BeginTooltip();
-						imGuiText("No descriptor was bound for this slot");
+						imGuiText("No descriptor set was bound for this slot");
 						// TODO: check whether the pipeline uses any bindings
 						// of this descriptor statically. Warn, if so.
 						// Are there any descriptor flags that would allow this?
@@ -519,16 +522,63 @@ void CommandViewer::displayDsList() {
 				continue;
 			}
 
-			// TODO: this can happen now with descriptor cows
-			auto stateIt = dsState.states.find(ds.dsEntry);
-			dlg_assert_or(stateIt != dsState.states.end(), continue);
+			if(!compatibleForSetN(pipeLayout, *ds.layout, setID)) {
+				if(showIncompatibleSets) {
+					auto label = dlg::format("Descriptor Set {}: incompatible", setID);
+					auto flags = ImGuiTreeNodeFlags_Bullet |
+						ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen |
+						ImGuiTreeNodeFlags_SpanFullWidth |
+						ImGuiTreeNodeFlags_FramePadding;
+					ImGui::TreeNodeEx(label.c_str(), flags);
 
-			auto& dsCow = *stateIt->second;
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						imGuiText("A descriptor set was bind for this slot but "
+							"with an incompatible layout");
+						ImGui::EndTooltip();
+					}
+				}
+
+				continue;
+			}
+
+			std::unique_lock<DebugMutex> dsCowLock;
+			DescriptorStateRef state;
+			auto& dsLayout = *pipeLayout.descriptors[setID];
+
+			if(ds.dsEntry) {
+				auto stateIt = dsState.states.find(ds.dsEntry);
+				if(stateIt == dsState.states.end()) {
+					// not 100% sure how this can happen
+					dlg_error("uncaptured set");
+					if (showUncapturedSets) {
+						auto label = dlg::format("Descriptor Set {}: not captured", setID);
+						auto flags = ImGuiTreeNodeFlags_Bullet |
+							ImGuiTreeNodeFlags_Leaf |
+							ImGuiTreeNodeFlags_NoTreePushOnOpen |
+							ImGuiTreeNodeFlags_SpanFullWidth |
+							ImGuiTreeNodeFlags_FramePadding;
+						ImGui::TreeNodeEx(label.c_str(), flags);
+					}
+
+					continue;
+				}
+
+				auto& dsCow = *stateIt->second;
+				std::tie(state, dsCowLock) = access(dsCow);
+
+				dlg_assert(compatible(dsLayout, *state.layout));
+			} else {
+				dlg_assert_or(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT, continue);
+				state.data = ds.pushDescriptors.data();
+				state.layout = &dsLayout;
+				state.variableDescriptorCount = 0u;
+			}
 
 			auto label = dlg::format("Descriptor Set {}", setID);
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if(ImGui::TreeNodeEx(label.c_str(), toplevelFlags)) {
-				auto [state, lock] = access(dsCow);
 				for(auto bID = 0u; bID < state.layout->bindings.size(); ++bID) {
 					auto sstages = stages(pipe);
 					dlg_assert(!sstages.empty());

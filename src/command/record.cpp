@@ -76,6 +76,82 @@ CommandRecord::~CommandRecord() {
 }
 
 // util
+void bindPushDescriptors(Device& dev, VkCommandBuffer cb, VkPipelineBindPoint bbp,
+		BoundDescriptorSet& bds, u32 setID) {
+	auto& dsLayout = bds.layout->descriptors[setID];
+	dlg_assert(dsLayout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
+
+	auto dsData = DescriptorStateRef{};
+	dsData.layout = dsLayout.get();
+	dsData.data = bds.pushDescriptors.data();
+
+	ThreadMemScope tms;
+	auto writes = tms.alloc<VkWriteDescriptorSet>(dsLayout->bindings.size());
+	for(auto [i, bindingLayout] : enumerate(dsLayout->bindings)) {
+		auto& dst = writes[i];
+
+		dst = {};
+		dst.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		dst.descriptorType = bindingLayout.descriptorType;
+		dst.dstBinding = i;
+		dst.descriptorCount = bindingLayout.descriptorCount;
+
+		switch(category(dst.descriptorType)) {
+			case DescriptorCategory::buffer: {
+				auto dstBufs = tms.alloc<VkDescriptorBufferInfo>(dst.descriptorCount);
+				auto srcBufs = buffers(dsData, i);
+				for(auto i = 0u; i < dst.descriptorCount; ++i) {
+					auto* buf = srcBufs[i].buffer; dstBufs[i].buffer = buf ? buf->handle : VK_NULL_HANDLE;
+					dstBufs[i].offset = srcBufs[i].offset;
+					dstBufs[i].range = srcBufs[i].range;
+				}
+				dst.pBufferInfo = dstBufs.data();
+				break;
+			} case DescriptorCategory::image: {
+				auto dstImages = tms.alloc<VkDescriptorImageInfo>(dst.descriptorCount);
+				auto srcImages = images(dsData, i);
+				for(auto i = 0u; i < dst.descriptorCount; ++i) {
+					auto* iv = srcImages[i].imageView;
+					auto* sampler = srcImages[i].sampler;
+					dstImages[i].imageView = iv ? iv->handle : VK_NULL_HANDLE;
+					dstImages[i].sampler = sampler ? sampler->handle : VK_NULL_HANDLE;
+					dstImages[i].imageLayout = srcImages[i].layout;
+				}
+				dst.pImageInfo = dstImages.data();
+				break;
+			} case DescriptorCategory::bufferView: {
+				auto dstViews = tms.alloc<VkBufferView>(dst.descriptorCount);
+				auto srcViews = bufferViews(dsData, i);
+				for(auto i = 0u; i < dst.descriptorCount; ++i) {
+					auto* bv = srcViews[i].bufferView;
+					dstViews[i] = bv ? bv->handle : VK_NULL_HANDLE;
+				}
+				dst.pTexelBufferView = dstViews.data();
+				break;
+			} case DescriptorCategory::accelStruct: {
+				auto& asWrite = tms.construct<VkWriteDescriptorSetAccelerationStructureKHR>();
+				asWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+
+				auto dstAS = tms.alloc<VkAccelerationStructureKHR>(dst.descriptorCount);
+				auto srcAS = accelStructs(dsData, i);
+				for(auto i = 0u; i < dst.descriptorCount; ++i) {
+					auto* as = srcAS[i].accelStruct;
+					dstAS[i] = as ? as->handle : VK_NULL_HANDLE;
+				}
+
+				asWrite.pAccelerationStructures = dstAS.data();
+				asWrite.accelerationStructureCount = dstAS.size();
+				dst.pNext = &asWrite;
+			} default:
+				dlg_error("Invalid/unknown descriptor type");
+				break;
+		}
+	}
+
+	dev.dispatch.CmdPushDescriptorSet(cb, bbp, bds.layout->handle,
+		setID, writes.size(), writes.data());
+}
+
 void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 	assertOwned(dev.mutex);
 
@@ -86,6 +162,22 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
 		auto& bds = state.descriptorSets[i];
+		if(!bds.dsPool && bds.layout) {
+			dlg_assert(!bds.dsEntry);
+
+			// NOTE: we only need this since we don't track this during recording
+			// anymore at the moment.
+			if(state.pipe && !compatibleForSetN(*state.pipe->layout,
+					*bds.layout, i)) {
+				dlg_info("incompatible set {}", i);
+				break;
+			}
+
+			bindPushDescriptors(dev, cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				bds, i);
+			continue;
+		}
+
 		auto [ds, lock] = tryAccess(bds);
 		dlg_assert(ds);
 
@@ -238,6 +330,7 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 		accelStructs(alloc),
 		events(alloc),
 		dsPools(alloc),
+		shaderObjects(alloc),
 		descriptorSets(alloc),
 		images(alloc) {
 }

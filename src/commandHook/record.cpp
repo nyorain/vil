@@ -801,35 +801,49 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	auto it = info.descriptors->states.find(dsState.descriptorSets[setID].dsEntry);
-	if(it == info.descriptors->states.end()) {
-		dlg_error("Could not find descriptor in snapshot??");
-		return;
+	auto& bds = dsState.descriptorSets[setID];
+	dlg_assert_or(bds.layout, return);
+	dlg_assert_or(setID < bds.layout->descriptors.size(), return);
+
+	auto& dsLayout = *bds.layout->descriptors[setID];
+	dlg_assert_or(bindingID < dsLayout.bindings.size(), return);
+	auto& bindingLayout = dsLayout.bindings[bindingID];
+	dlg_assert_or(elemID < bindingLayout.descriptorCount, return);
+
+	std::unique_lock<DebugMutex> dsCowLock;
+	DescriptorStateRef descriptors;
+
+	dlg_assert_or(bool(bds.dsEntry) == bool(bds.dsPool), return);
+
+	if (bds.dsEntry) {
+		dlg_assert(!(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT));
+		auto it = info.descriptors->states.find(bds.dsEntry);
+		if(it == info.descriptors->states.end()) {
+			dlg_error("Could not find descriptor in snapshot??");
+			return;
+		}
+
+		dstCow = it->second;
+		std::tie(descriptors, dsCowLock) = access(*it->second);
+
+		dlg_assert_or(compatible(*descriptors.layout, dsLayout), return);
+		dlg_assert_or(elemID < descriptorCount(descriptors, bindingID), return);
+	} else {
+		dlg_assert(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
+		descriptors.data = bds.pushDescriptors.data();
+		descriptors.layout = &dsLayout;
+		descriptors.variableDescriptorCount = 0u;
 	}
 
-	dstCow = it->second;
-	auto [ds, lock] = access(*it->second);
-
-	if(bindingID >= ds.layout->bindings.size()) {
-		dlg_trace("bindingID out of range");
-		return;
-	}
-
-	if(elemID >= descriptorCount(ds, bindingID)) {
-		dlg_trace("elemID out of range");
-		return;
-	}
-
-	auto& lbinding = ds.layout->bindings[bindingID];
-	auto cat = category(lbinding.descriptorType);
+	auto cat = category(bindingLayout.descriptorType);
 
 	// Setting imageAsBuffer when the descriptor isn't of image type does
 	// not make sense
 	dlg_assertl(dlg_level_warn, cat == DescriptorCategory::image || !imageAsBuffer);
 
 	if(cat == DescriptorCategory::image) {
-		auto& elem = images(ds, bindingID)[elemID];
-		if(needsImageView(lbinding.descriptorType)) {
+		auto& elem = images(descriptors, bindingID)[elemID];
+		if(needsImageView(bindingLayout.descriptorType)) {
 			auto& imgView = elem.imageView;
 			dlg_assert(imgView);
 			dlg_assert(imgView->img);
@@ -884,15 +898,16 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 			dlg_error("Requested descriptor binding copy for sampler");
 		}
 	} else if(cat == DescriptorCategory::buffer) {
-		auto& elem = buffers(ds, bindingID)[elemID];
+		auto& elem = buffers(descriptors, bindingID)[elemID];
 		dlg_assert(elem.buffer);
 
 		usedHandles.push_back(elem.buffer);
 
 		// calculate offset, taking dynamic offset into account
 		auto off = elem.offset;
-		if(needsDynamicOffset(lbinding.descriptorType)) {
-			auto baseOff = lbinding.dynOffset;
+		if(needsDynamicOffset(bindingLayout.descriptorType)) {
+			dlg_assert(!(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT));
+			auto baseOff = bindingLayout.dynOffset;
 			auto dynOffs = dsState.descriptorSets[setID].dynamicOffsets;
 			dlg_assert(baseOff + elemID < dynOffs.size());
 			off += dynOffs[baseOff + elemID];
@@ -910,7 +925,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dstBuf, 0u, *elem.buffer, off, size, {});
 	} else if(cat == DescriptorCategory::accelStruct) {
-		auto& elem = accelStructs(ds, bindingID)[elemID];
+		auto& elem = accelStructs(descriptors, bindingID)[elemID];
 
 		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
 		auto& dstCapture = dst.data.emplace<CapturedAccelStruct>();

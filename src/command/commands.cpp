@@ -941,7 +941,13 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 
 // BindIndexBufferCmd
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdBindIndexBuffer(cb, buffer ? buffer->handle : VK_NULL_HANDLE, offset, indexType);
+	if (size) {
+		dlg_assert(dev.dispatch.CmdBindIndexBuffer2);
+		dev.dispatch.CmdBindIndexBuffer2(cb, buffer ? buffer->handle : VK_NULL_HANDLE,
+			offset, *size, indexType);
+	} else {
+		dev.dispatch.CmdBindIndexBuffer(cb, buffer ? buffer->handle : VK_NULL_HANDLE, offset, indexType);
+	}
 }
 
 // BindDescriptorSetCmd
@@ -1825,7 +1831,7 @@ void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u
 
 // VK_EXT_line_rasterization
 void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetLineStippleEXT(cb, stippleFactor, stipplePattern);
+	dev.dispatch.CmdSetLineStipple(cb, stippleFactor, stipplePattern);
 }
 
 // VK_EXT_extended_dynamic_state
@@ -2110,6 +2116,21 @@ void SetColorWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) 
 	dlg_assert(dev.dispatch.CmdSetColorWriteEnableEXT);
 	dev.dispatch.CmdSetColorWriteEnableEXT(cb,
 		u32(writeEnables.size()), writeEnables.data());
+}
+
+void BindShadersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dlg_assert(dev.dispatch.CmdBindShadersEXT);
+	dlg_assert(stages.size() == shaders.size());
+
+	ThreadMemScope memScope;
+	auto vkShaders = rawHandles(memScope, shaders);
+	dev.dispatch.CmdBindShadersEXT(cb, stages.size(),
+		stages.data(), vkShaders.data());
+}
+
+void SetDepthClampRangeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dlg_assert(dev.dispatch.CmdSetDepthClampRangeEXT);
+	dev.dispatch.CmdSetDepthClampRangeEXT(cb, mode, &range);
 }
 
 bool isIndirect(const Command& cmd) {
