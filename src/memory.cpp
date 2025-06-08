@@ -286,6 +286,48 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
 		pCommittedMemoryInBytes);
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL MapMemory2(
+		VkDevice                                    device,
+		const VkMemoryMapInfo*                      pMemoryMapInfo,
+		void**                                      ppData) {
+	auto& mem = get(device, pMemoryMapInfo->memory);
+
+	auto infoCopy = *pMemoryMapInfo;
+	infoCopy.memory = mem.handle;
+
+	auto res = mem.dev->dispatch.MapMemory2(mem.dev->handle, &infoCopy, ppData);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	std::lock_guard lock(mem.dev->mutex); // TODO PERF
+	dlg_assert(!mem.map);
+	mem.map = *ppData;
+	mem.mapOffset = infoCopy.offset;
+	mem.mapSize = infoCopy.size;
+
+	return res;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL UnmapMemory2(
+		VkDevice                                    device,
+		const VkMemoryUnmapInfo*                    pMemoryUnmapInfo) {
+	auto& mem = get(device, pMemoryUnmapInfo->memory);
+
+	{
+		std::lock_guard lock(mem.dev->mutex); // TODO PERF
+		dlg_assert(mem.map);
+		mem.map = nullptr;
+		mem.mapOffset = 0u;
+		mem.mapSize = 0u;
+	}
+
+	auto infoCopy = *pMemoryUnmapInfo;
+	infoCopy.memory = mem.handle;
+
+	return mem.dev->dispatch.UnmapMemory2(mem.dev->handle, &infoCopy);
+}
+
 // Calls the given callback for every resource overlapping the given
 // range of mem[off, off + size)
 template<typename F>

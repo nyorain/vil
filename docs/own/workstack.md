@@ -1,6 +1,15 @@
+- [ ] fix vulkan samples vertex input issues (e.g. try gears)
+- [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
+
 - [ ] rename vku to vpp?
+- [ ] Textual "bound descriptor sets" inspector
+	- [ ] Allow to inspect before/after BindDescriptorSets/PushDescriptorSet
 - [ ] make xfb patching also use new dynamic on-demand patching system?
 	- [ ] make that less error-prone. Completely store/forward pNext?
+- [ ] do we really need the advanceUntilValid calls in ds.cpp?
+      We do not handle it like this for push descriptors in cb.cpp.
+	  Write interfaces that can handle the overflow that vulkan allows?
+	  Should be compatible with out memory layout.
 - [ ] CommandHook: soft invalidate (don't invalidate state)
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
@@ -107,6 +116,24 @@
   or something I guess)
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
+
+- [ ] support 1.4 core
+- [ ] support VK_KHR_maintenance{5, 6} (new CmdBind calls)
+- [ ] support VK_EXT_mesh_shader
+	- [ ] capture vertex input via shader patching?
+- [ ] properly support VK_EXT_shader_object
+	- [ ] remove StateCmdBase::boundPipe()
+	      Instead, introduce a ShaderState
+struct ShaderStage {
+	VkShaderStageFlagBits stage;
+	ShaderObject* shader;
+};
+
+ShaderState {
+	span<ShaderStage> stages;
+	Pipeline* pipe; // optional
+};
+
 
 low prio:
 - [ ] cleanup imageToBuffer implementation

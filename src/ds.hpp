@@ -136,6 +136,11 @@ struct DescriptorSetLayout : SharedDeviceHandle {
 bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b,
 		bool checkImmutableSamplers = true);
 
+// Returns the total raw memory size needed by descriptor state of
+// the given layout, with the given variable descriptor count.
+size_t totalDescriptorMemSize(const DescriptorSetLayout& layout,
+	u32 variableDescriptorCount);
+
 // Returns whether the two given DescriptorSetLayouts have bindings that
 // conflict with each other. Each layout can have bindings that the other
 // set does not have, as long as their common bindings have the same
@@ -308,6 +313,11 @@ struct DescriptorUpdateTemplate : SharedDeviceHandle {
 
 	VkDescriptorUpdateTemplate handle {};
 	std::vector<VkDescriptorUpdateTemplateEntry> entries;
+
+	VkPipelineBindPoint bindPoint {};
+	IntrusivePtr<DescriptorSetLayout> dsLayout;
+	IntrusivePtr<PipelineLayout> pipeLayout;
+	u32 set {};
 
 	~DescriptorUpdateTemplate();
 };

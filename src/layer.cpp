@@ -488,6 +488,8 @@ struct HookedFunction {
 #define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_VERSION_1_0, {}, {}}}
 
 static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
+		std::initializer_list<std::pair<const std::string_view, HookedFunction>>{
+
 	VIL_INI_HOOK(GetInstanceProcAddr, VK_API_VERSION_1_0),
 	VIL_INI_HOOK(CreateInstance, VK_API_VERSION_1_0),
 	VIL_INI_HOOK(DestroyInstance, VK_API_VERSION_1_0),
@@ -556,6 +558,13 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS_CORE(BindImageMemory2KHR, BindImageMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
+	VIL_DEV_HOOK(GetImageSubresourceLayout2, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK_ALIAS_CORE(GetImageSubresourceLayout2KHR,
+		GetImageSubresourceLayout2, VK_KHR_MAINTENANCE_5_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(GetImageSubresourceLayout2EXT,
+		GetImageSubresourceLayout2,
+		VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME | VK_EXT_IMAGE_COMPRESSION_CONTROL_EXTENSION_NAME),
+
 	VIL_DEV_HOOK(GetImageMemoryRequirements2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(GetImageMemoryRequirements2KHR, GetImageMemoryRequirements2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
@@ -605,9 +614,20 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(InvalidateMappedMemoryRanges, VK_API_VERSION_1_0),
 	VIL_DEV_HOOK(GetDeviceMemoryCommitment, VK_API_VERSION_1_0),
 
+	VIL_DEV_HOOK(MapMemory2, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK_ALIAS_CORE(MapMemory2KHR, MapMemory2,
+		VK_KHR_MAP_MEMORY_2_EXTENSION_NAME),
+	VIL_DEV_HOOK(UnmapMemory2, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK_ALIAS_CORE(UnmapMemory2KHR, UnmapMemory2,
+		VK_KHR_MAP_MEMORY_2_EXTENSION_NAME),
+
 	// shader.hpp
 	VIL_DEV_HOOK(CreateShaderModule, VK_API_VERSION_1_0),
 	VIL_DEV_HOOK(DestroyShaderModule, VK_API_VERSION_1_0),
+
+	VIL_DEV_HOOK_EXT(CreateShadersEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(DestroyShaderEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetShaderBinaryDataEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
 
 	// sync.hpp
 	VIL_DEV_HOOK(CreateFence, VK_API_VERSION_1_0),
@@ -792,15 +812,26 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS_CORE(CmdResolveImage2KHR, CmdResolveImage2,
 		VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
 
-	VIL_DEV_HOOK_EXT(CmdPushDescriptorSetKHR, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
-	VIL_DEV_HOOK_EXT(CmdPushDescriptorSetWithTemplateKHR, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+	VIL_DEV_HOOK(CmdPushDescriptorSet, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK(CmdPushDescriptorSetWithTemplate, VK_API_VERSION_1_4),
+
+	VIL_DEV_HOOK_ALIAS_CORE(CmdPushDescriptorSetKHR,
+		CmdPushDescriptorSet,
+		VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdPushDescriptorSetWithTemplateKHR,
+		CmdPushDescriptorSetWithTemplate,
+		VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(CmdSetFragmentShadingRateKHR, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(CmdBeginConditionalRenderingEXT, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdEndConditionalRenderingEXT, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME),
 
-	VIL_DEV_HOOK_EXT(CmdSetLineStippleEXT, VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME),
+	VIL_DEV_HOOK(CmdSetLineStipple, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdSetLineStippleEXT, CmdSetLineStipple,
+		VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdSetLineStippleKHR, CmdSetLineStipple,
+		VK_KHR_LINE_RASTERIZATION_EXTENSION_NAME),
 
 	// extended dynamic state
 	VIL_DEV_HOOK(CmdSetCullMode, VK_API_VERSION_1_3),
@@ -868,6 +899,13 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdTraceRaysIndirectKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetRayTracingPipelineStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
+	VIL_DEV_HOOK_EXT(CmdBindShadersEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetDepthClampRangeEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
+
+	VIL_DEV_HOOK(CmdBindIndexBuffer2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdBindIndexBuffer2KHR, CmdBindIndexBuffer2,
+		VK_KHR_MAINTENANCE_5_EXTENSION_NAME),
+
 	// sync2
 	VIL_DEV_HOOK(CmdSetEvent2, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK(CmdResetEvent2, VK_API_VERSION_1_3),
@@ -896,7 +934,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
-};
+}};
 
 #undef VIL_INI_HOOK
 #undef VIL_INI_HOOK_EXT

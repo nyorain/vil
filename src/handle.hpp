@@ -68,6 +68,7 @@ struct ResourceVisitor {
 	virtual void visit(Swapchain&) = 0;
 	virtual void visit(ShaderModule&) = 0;
 	virtual void visit(AccelStruct&) = 0;
+	virtual void visit(ShaderObject&) = 0;
 };
 
 template<typename F>
@@ -103,6 +104,7 @@ struct TemplateResourceVisitor : ResourceVisitor {
 	void visit(Swapchain& res) override { impl(res); }
 	void visit(ShaderModule& res) override { impl(res); }
 	void visit(AccelStruct& res) override { impl(res); }
+	void visit(ShaderObject& res) override { impl(res); }
 };
 
 struct ObjectTypeHandler {

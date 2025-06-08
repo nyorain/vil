@@ -486,17 +486,20 @@ void CommandViewer::displayDsList() {
 	// TODO: make runtime setting?
 	// whether to notify of unbound descriptor sets
 	static constexpr auto showUnboundSets = true;
+	static constexpr auto showIncompatibleSets = true;
+	static constexpr auto showUncapturedSets = true;
 
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	auto toplevelFlags = ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth;
 	if(ImGui::TreeNodeEx("Descriptors", toplevelFlags)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		auto size = std::min(dss.size(), cmd->boundPipe()->layout->descriptors.size());
+		auto& pipeLayout = *cmd->boundPipe()->layout;
+		auto size = std::min(dss.size(), pipeLayout.descriptors.size());
 		for(auto setID = 0u; setID < size; ++setID) {
 			auto& ds = dss[setID];
 
 			// No descriptor set bound
-			if(!ds.dsEntry) {
+			if(!ds.layout) {
 				if(showUnboundSets) {
 					auto label = dlg::format("Descriptor Set {}: unbound", setID);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
@@ -508,7 +511,7 @@ void CommandViewer::displayDsList() {
 
 					if(ImGui::IsItemHovered()) {
 						ImGui::BeginTooltip();
-						imGuiText("No descriptor was bound for this slot");
+						imGuiText("No descriptor set was bound for this slot");
 						// TODO: check whether the pipeline uses any bindings
 						// of this descriptor statically. Warn, if so.
 						// Are there any descriptor flags that would allow this?
@@ -519,16 +522,52 @@ void CommandViewer::displayDsList() {
 				continue;
 			}
 
-			// TODO: this can happen now with descriptor cows
-			auto stateIt = dsState.states.find(ds.dsEntry);
-			dlg_assert_or(stateIt != dsState.states.end(), continue);
+			if(!compatibleForSetN(pipeLayout, *ds.layout, setID)) {
+				if(showIncompatibleSets) {
+					auto label = dlg::format("Descriptor Set {}: incompatible", setID);
+					auto flags = ImGuiTreeNodeFlags_Bullet |
+						ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen |
+						ImGuiTreeNodeFlags_SpanFullWidth |
+						ImGuiTreeNodeFlags_FramePadding;
+					ImGui::TreeNodeEx(label.c_str(), flags);
 
-			auto& dsCow = *stateIt->second;
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						imGuiText("A descriptor set was bind for this slot but "
+							"with an incompatible layout");
+						ImGui::EndTooltip();
+					}
+				}
+
+				continue;
+			}
+
+			auto [state, dsCowLock] = accessSet(cmd->boundDescriptors(),
+				setID, dsState);
+			if (!state.data) {
+				// not 100% sure how this can happen
+				dlg_error("uncaptured set");
+				if (showUncapturedSets) {
+					auto label = dlg::format("Descriptor Set {}: not captured", setID);
+					auto flags = ImGuiTreeNodeFlags_Bullet |
+						ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen |
+						ImGuiTreeNodeFlags_SpanFullWidth |
+						ImGuiTreeNodeFlags_FramePadding;
+					ImGui::TreeNodeEx(label.c_str(), flags);
+				}
+
+				continue;
+			}
 
 			auto label = dlg::format("Descriptor Set {}", setID);
+			if (state.layout && state.layout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT) {
+				label += " (Push)";
+			}
+
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if(ImGui::TreeNodeEx(label.c_str(), toplevelFlags)) {
-				auto [state, lock] = access(dsCow);
 				for(auto bID = 0u; bID < state.layout->bindings.size(); ++bID) {
 					auto sstages = stages(pipe);
 					dlg_assert(!sstages.empty());
@@ -827,21 +866,17 @@ void CommandViewer::displayDs(Draw& draw) {
 		return;
 	}
 
-	auto* setEntry = dss[setID].dsEntry;
-	if(!setEntry) {
+	const auto& descriptors = selection().descriptorSnapshot();
+
+	// NOTE: while holding this potential lock we MUST not lock the device or
+	// queue mutex.
+	auto [dsState, dsCowLock] = accessSet(cmd->boundDescriptors(), setID, descriptors);
+
+	if(!dsState.data) {
 		ImGui::Text("DescriptorSet null");
 		dlg_warn("DescriptorSet null? Shouldn't happen");
 		return;
 	}
-
-	const auto& descriptors = selection().descriptorSnapshot();
-	auto stateIt = descriptors.states.find(setEntry);
-	dlg_assert_or(stateIt != descriptors.states.end(), return);
-
-	// NOTE: while holding this lock we MUST not lock the device or
-	// queue mutex.
-	auto& dsCow = *stateIt->second;
-	auto [dsState, lock] = access(dsCow);
 
 	if(bindingID >= dsState.layout->bindings.size()) {
 		ImGui::Text("Binding not bound");
@@ -1020,7 +1055,7 @@ void CommandViewer::displayDs(Draw& draw) {
 
 				// TODO: hacky, done because displayImage used to
 				// acquire the device mutex in some cases
-				lock = {};
+				dsCowLock = {};
 				dsState = {};
 				displayImage(draw, *img);
 			}

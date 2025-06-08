@@ -807,7 +807,7 @@ void add(MatchVal& m, MatchType mt,
 
 	// quadratic complexity below, only do for small number of pipe binds.
 	// TODO: use LMM for pipes, should help a little.
-	constexpr auto maxMatchCount = 15u; 
+	constexpr auto maxMatchCount = 15u;
 	if(maxPipes < maxMatchCount) {
 		// every pipeline match counts like N commands
 		constexpr auto pipeWeight = 10.f;
@@ -1245,7 +1245,7 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 			// TODO: only consider descriptors statically used by pipeline
 			// NOTE: the `min(dsCount, ...)` is used defensively here to
 			//   account for extensions that mess with bound-descriptor
-			//   requirements, e.g. push descriptors.
+			//   requirements
 			auto* dstCmd = dynamic_cast<const StateCmdBase*>(dst[0]);
 			dlg_assert_or(dstCmd, continue);
 
@@ -1267,33 +1267,22 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 			if(!dstBound.empty() || !srcBound.empty()) {
 				// TODO: consider dynamic offsets?
 				for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
-					if(!srcBound[i].dsEntry || !dstBound[i].dsEntry) {
-						// TODO: not sure if this can happen. Do sets
-						// that are statically not used by pipeline
-						// have to be bound?
-						dlg_warn("ds not bound? shouldn't happen");
-						continue;
-					}
-
 					// We cannot rely on the src record being valid here
 					// srcLock will hold a look on the ds pool while
 					// dstLock below will hold a lock on a specific cow (valid
 					// lock order).
-					auto [srcDs, srcLock] = tryAccess(srcBound[i]);
-					if(!srcDs) {
+					auto [srcDs, srcLock] = tryAccessState(srcCmd->boundDescriptors(), i);
+					if (!srcDs.data) {
 						continue;
 					}
 
-					auto dstDsCow = dstDsState.states.find(dstBound[i].dsEntry);
-					// TODO: we might not find it here due to the new
-					// descriptor set capturing rework.
-					if(dstDsCow == dstDsState.states.end()) {
+					auto [dstDs, dstLock] = accessSet(
+						dstCmd->boundDescriptors(), i, dstDsState);
+					if (!dstDs.data) {
 						continue;
 					}
 
-					auto [dstDs, dstLock] = access(*dstDsCow->second);
-
-					auto res = vil::match(mt, *srcDs, dstDs);
+					auto res = vil::match(mt, srcDs, dstDs);
 					m.match += res.match;
 					m.total += res.total;
 				}
