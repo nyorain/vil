@@ -141,6 +141,8 @@ enum class CommandType : u32 {
 	endRendering,
 	setVertexInput,
 	setColorWriteEnable,
+	bindShaders,
+	setDepthClampRange,
 
 	count,
 };
@@ -623,8 +625,11 @@ struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffe
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	VkIndexType indexType {};
+	std::optional<VkDeviceSize> size {}; // for vkCmdBindIndexBuffer2KHR
 
-	std::string_view nameDesc() const override { return "BindIndexBuffer"; }
+	std::string_view nameDesc() const override {
+		return size ? "BindIndexBuffer2" : "BindIndexBuffer";
+	}
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -632,13 +637,17 @@ struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffe
 
 struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescriptorSet> {
 	u32 firstSet;
-	VkPipelineBindPoint pipeBindPoint;
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
 	span<DescriptorSet*> sets; // NOTE: handles may be invalid
 	span<u32> dynamicOffsets;
 
+	VkPipelineBindPoint pipeBindPoint {}; // only relevant for BindDescriptorSets
+	VkShaderStageFlags stageFlags {}; // only relevant for BindDescriptorSets2
+
 	std::string toString() const override;
-	std::string_view nameDesc() const override { return "BindDescriptorSets"; }
+	std::string_view nameDesc() const override {
+		return stageFlags ? "BindDescriptorSets2" : "BindDescriptorSets";
+	}
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void displayInspector(Gui& gui) const override;
@@ -1150,18 +1159,23 @@ struct CopyQueryPoolResultsCmd final : CmdDerive<Command, CommandType::copyQuery
 
 // Push descriptor commands
 struct PushDescriptorSetCmd final : CmdDerive<Command, CommandType::pushDescriptorSet> {
-	VkPipelineBindPoint bindPoint {};
 	PipelineLayout* pipeLayout {};
 	u32 set {};
+
+	VkPipelineBindPoint bindPoint {}; // only relevant for PushDescriptorSet
+	VkShaderStageFlags stages {}; // only relevant for PushDescriptorSet2
 
 	// The individual pImageInfo, pBufferInfo, pTexelBufferView arrays
 	// are allocated in the CommandRecord-owned memory as well.
 	span<VkWriteDescriptorSet> descriptorWrites;
 
 	Category category() const override { return Category::bind; }
-	std::string_view nameDesc() const override { return "PushDescriptorSet"; }
+	std::string_view nameDesc() const override {
+		return stages ? "PushDescriptorSet2" : "PushDescriptorSet";
+	}
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	void displayInspector(Gui& gui) const override;
 };
 
 struct PushDescriptorSetWithTemplateCmd final : CmdDerive<Command, CommandType::pushDescriptorSetWithTemplate> {
@@ -1586,6 +1600,27 @@ struct SetColorWriteEnableCmd final : CmdDerive<Command, CommandType::setColorWr
 	Category category() const override { return Category::bind; }
 };
 
+// VK_EXT_shader_object
+struct BindShadersCmd final : CmdDerive<Command, CommandType::bindShaders> {
+	span<VkShaderStageFlagBits> stages;
+	span<ShaderObject*> shaders;
+
+	std::string_view nameDesc() const override { return "BindShadersCmd"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Category category() const override { return Category::bind; }
+};
+
+struct SetDepthClampRangeCmd final : CmdDerive<Command, CommandType::setDepthClampRange> {
+	VkDepthClampModeEXT mode;
+	VkDepthClampRangeEXT range {};
+
+	std::string_view nameDesc() const override { return "SetDepthClampRange"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Category category() const override { return Category::bind; }
+};
+
 // Visitor
 // Might seem overkill to have this here but it's useful in multiple
 // scenarios: in many cases we have extensive external functionality operating
@@ -1709,6 +1744,9 @@ struct CommandVisitor {
 	virtual void visit(const SetDiscardRectangleCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SetVertexInputCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SetColorWriteEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthClampRangeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const BindShadersCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 
 	virtual void visit(const CopyAccelStructCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const CopyAccelStructToMemoryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
@@ -1838,6 +1876,9 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const SetDiscardRectangleCmd& cmd) override { f(cmd); }
 	void visit(const SetVertexInputCmd& cmd) override { f(cmd); }
 	void visit(const SetColorWriteEnableCmd& cmd) override { f(cmd); }
+	void visit(const SetDepthClampRangeCmd& cmd) override { f(cmd); }
+
+	void visit(const BindShadersCmd& cmd) override { f(cmd); }
 
 	void visit(const CopyAccelStructCmd& cmd) override { f(cmd); }
 	void visit(const CopyAccelStructToMemoryCmd& cmd) override { f(cmd); }

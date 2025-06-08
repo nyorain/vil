@@ -62,6 +62,7 @@ struct RenderPassDesc;
 struct AccelStruct;
 struct PipelineShaderStage;
 struct DescriptorPoolSetEntry;
+struct ShaderObject;
 
 struct Queue;
 struct QueueFamily;

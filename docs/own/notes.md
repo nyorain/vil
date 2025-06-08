@@ -25,3 +25,8 @@ last commit with alternative (linked-list, self-maintained heap) versions
 of candidate management in lmm:
 de8321e56ec94465f0bfa39d20da179a7ac84ac7
 
+---
+
+last commit with removed PCR tracking (commented out in CmdPushConstants):
+2ee852f40d5d00cbb070a320ca1027d2627fdb2d
+

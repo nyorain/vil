@@ -176,6 +176,8 @@ constexpr auto creators = std::array{
 	&CommandCreator<EndRenderingCmd>::load,
 	&CommandCreator<SetVertexInputCmd>::load,
 	&CommandCreator<SetColorWriteEnableCmd>::load,
+	&CommandCreator<BindShadersCmd>::load,
+	&CommandCreator<SetDepthClampRangeCmd>::load,
 };
 
 Command& loadCommand(CommandLoader& loader) {

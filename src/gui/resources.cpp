@@ -1493,6 +1493,12 @@ void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
 	imGuiText("TODO");
 }
 
+void ResourceGui::drawDesc(Draw& draw, ShaderObject& sobj) {
+	(void) draw;
+	(void) sobj;
+	imGuiText("TODO");
+}
+
 void ResourceGui::clearHandles() {
 	auto decRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
 		using HT = std::remove_reference_t<decltype(res)>;

@@ -327,6 +327,17 @@ VKAPI_ATTR void VKAPI_CALL GetImageSubresourceLayout(
 		img.handle, pSubresource, pLayout);
 }
 
+VKAPI_ATTR void VKAPI_CALL GetImageSubresourceLayout2(
+		VkDevice                                    device,
+		VkImage                                     image,
+		const VkImageSubresource2*                  pSubresource,
+		VkSubresourceLayout2*                       pLayout) {
+	auto& img = get(device, image);
+	dlg_assert(img.dev->dispatch.GetImageSubresourceLayout2);
+	img.dev->dispatch.GetImageSubresourceLayout2(img.dev->handle,
+		img.handle, pSubresource, pLayout);
+}
+
 VKAPI_ATTR void VKAPI_CALL GetImageMemoryRequirements2(
 		VkDevice                                    device,
 		const VkImageMemoryRequirementsInfo2*       pInfo,

@@ -3,13 +3,13 @@
 Even when a feature/extension isn't explicitly supported by the layer,
 there are good chances that it might just work. If you plan on using
 extensions not explicitly supported, make sure to set the `VIL_WRAP=0`
-environment variable, it will significantly increase the chance that 
-new extensions "just work", with a slight performance hit. 
+environment variable, it will significantly increase the chance that
+new extensions "just work", with a slight performance hit.
 See [env.md](env.md) for more details.
 
 ## Vulkan 1.0
 
-Fully implemented. 
+Fully implemented.
 
 ## Vulkan 1.1
 
@@ -37,7 +37,7 @@ Implemented:
 - VK_KHR_draw_indirect_count
 - VK_KHR_create_renderpass2
 - VK_KHR_buffer_device_address (introspection support WIP)
-	- known problem: synchronization problems when using the gui on 
+	- known problem: synchronization problems when using the gui on
 	  commands/buffers using this feature. WIP
 - VK_KHR_imageless_framebuffer
 - VK_EXT_descriptor_indexing
@@ -72,7 +72,7 @@ Incomplete/missing:
 no-op/shader exts that should be supported out of the box (as long
 as spirv-tools supports them):
 - VK_KHR_maintenance4 (no changes needed afaik)
-- VK_KHR_shader_subgroup_extended_types 
+- VK_KHR_shader_subgroup_extended_types
 - VK_KHR_shader_non_semantic_info
 - VK_KHR_shader_terminate_invocation
 - VK_EXT_shader_demote_to_helper_invocation
@@ -82,6 +82,31 @@ as spirv-tools supports them):
 - VK_EXT_inline_uniform_block
 - VK_EXT_pipeline_creation_cache_control
 - VK_EXT_texel_buffer_alignment
+
+## Vulkan 1.4
+
+Implemented:
+- VK_KHR_map_memory2
+- VK_KHR_line_rasterization
+- VK_KHR_vertex_attribute_divisor
+
+Incomplete:
+- VK_KHR_maintenance5
+  allow to pass shader modules create info directly in pipeCreateInfo.pNext
+  missing UI support for new flags
+- VK_KHR_push_descriptor
+  No UI support, those descriptor won't show up, cannot be inspected
+- VK_EXT_vertex_attribute_divisor
+  need support in pipeline patch creation
+  probably an issue for many extensions that modify pipe creation
+- VK_KHR_maintenance6
+- VK_EXT_host_image_copy
+
+assumed no-op:
+- VK_KHR_shader_expect_assume
+- VK_KHR_shader_float_controls2
+- VK_KHR_shader_subgroup_rotate
+- VK_KHR_load_store_op_none
 
 ## Non-core extensions
 
@@ -98,9 +123,6 @@ supported but no/incomplete gui interaction/information:
 - VK_KHR_ray_tracing_pipeline
 - VK_EXT_extended_dynamic_state
 - VK_EXT_line_rasterization
-- VK_KHR_push_descriptor
-  not well tested, might have some issues.
-  push descriptors will not be shown correctly in UI
 - VK_KHR_draw_indirect_count
 - VK_EXT_sample_locations
 - VK_EXT_discard_rectangles
@@ -108,7 +130,7 @@ supported but no/incomplete gui interaction/information:
 - VK_EXT_color_write_enable
 - VK_EXT_multi_draw
 
-Extensions that just add new features or flags shouldn't need any 
+Extensions that just add new features or flags shouldn't need any
 support by the layer but may have incomplete introspection. New functions
 on physical device are usually also not a problem.
 For instance:
@@ -169,12 +191,16 @@ Using these extensions will likely cause a crash.
 - VK_NV_device_generated_commands
 - The old NV raytracing extensions. They also won't be supported in the future,
   use the KHR extensions instead.
+- VK_EXT_descriptor_buffer
 
-## NOTES: 
+- VK_EXT_extended_dynamic_state3
+- VK_EXT_shader_object (incomplete support)
+
+## NOTES:
 - vendor-specific extensions are generally not a focus, unless someone
   is interested in them and writes the code or sponsors someone to do it.
-- the layer does not have support for VK_EXT_debug_report/VK_EXT_debug_marker 
-  and will likely not add it in the future, either, as it is deprecated. 
+- the layer does not have support for VK_EXT_debug_report/VK_EXT_debug_marker
+  and will likely not add it in the future, either, as it is deprecated.
   Just use debug_utils, it's a better replacement.
 - support VK_KHR_device_group in the near future is unlikely since making it
   work with our concepts is not trivial

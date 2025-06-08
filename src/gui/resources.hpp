@@ -54,6 +54,7 @@ private:
 	void drawDesc(Draw&, Swapchain&);
 	void drawDesc(Draw&, AccelStruct&);
 	void drawDesc(Draw&, DescriptorUpdateTemplate&);
+	void drawDesc(Draw&, ShaderObject&);
 
 	void drawShaderInfo(VkPipeline, VkShaderStageFlagBits stage);
 	void drawImageContents(Draw&, Image&, bool doSelect);

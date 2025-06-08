@@ -412,15 +412,18 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	for(auto i = 0u; i < ops_.descriptorCopies.size(); ++i) {
 		auto [setID, bindingID, elemID, _1, _2] = ops_.descriptorCopies[i];
 
-		// We can safely access the ds here since we know that the record
-		// is still valid
-		auto& currDs = access(dsState.descriptorSets[setID]);
+		dlg_assert_or(dsState.descriptorSets[setID].layout, continue);
+		dlg_assert_or(setID < dsState.descriptorSets[setID].layout->descriptors.size(),
+			continue);
 
-		for(auto& binding : currDs.layout->bindings) {
-			if(binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT ||
-					binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) {
-				return true;
-			}
+		auto& dsLayout = dsState.descriptorSets[setID].layout->descriptors[setID];
+		dlg_assert_or(bindingID < dsLayout->bindings.size(), continue);
+
+		auto& bindingLayout = dsLayout->bindings[bindingID];
+
+		if (bindingLayout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT ||
+				bindingLayout.flags & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) {
+			return true;
 		}
 
 	/*

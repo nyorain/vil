@@ -35,9 +35,7 @@ struct BoundDescriptorSet {
 	// that the descriptorSet must be valid, e.g. at submission time.
 	// See CommandDescriptorSnapshot that maps these pointers
 	// to the DescriptorState at submission time.
-	// Unlike other handles, we don't unset these pointer even when the ds
-	// is invalidated or destroyed since we need descriptor information about
-	// potentially invalidated records for matching.
+	// Unlike other handles, we don't keep DescriptorSet handles alive.
 	// To detect whether the pointer is still valid outside of submission
 	// time (e.g. when a new record is selected in the gui), we store
 	// the pool and the dsID here.
@@ -45,7 +43,17 @@ struct BoundDescriptorSet {
 	DescriptorPool* dsPool {};
 	u32 dsID {};
 
-	span<u32> dynamicOffsets;
+	// For normal descriptor sets, dynamicOffsets is active (but potentially empty).
+	// For push descriptors, 'pushDescriptors' holds the data, just as
+	//   descriptor data is stored in a descriptor set. For push descriptor sets,
+	//   dsEntry == dsPool == null, while layout != null.
+	union {
+		span<u32> dynamicOffsets {};
+		span<std::byte> pushDescriptors;
+	};
+
+	// The pipe layout used for binding this descriptor set.
+	// Can be used to detect out-of-date bindings.
 	PipelineLayout* layout {};
 };
 
@@ -54,14 +62,14 @@ using BufferViewDescriptorRef = BufferView*;
 struct DescriptorState {
 	span<BoundDescriptorSet> descriptorSets;
 
-	// TODO: we don't track this correctly atm.
-	// important to do this, also fix in vil::bind(..., state) below then
-	span<std::byte> pushDescriptors;
-
 	// Will always re-allocate the descriptorSets span
 	void bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> offsets);
 };
+
+// Can fail, will return ref with no layout/data in that case
+std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> accessSet(
+	const DescriptorState& state, u32 set, const CommandDescriptorSnapshot& snapshot);
 
 struct BoundVertexBuffer {
 	Buffer* buffer {};
@@ -335,6 +343,7 @@ struct CommandRecord {
 		UsedHandleSet<AccelStruct> accelStructs;
 		UsedHandleSet<Event> events;
 		UsedHandleSet<DescriptorPool> dsPools;
+		UsedHandleSet<ShaderObject> shaderObjects;
 
 		CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
 		CommandAllocHashSet<UsedImage, RefHandleHash> images;
@@ -368,14 +377,21 @@ struct CommandRecord {
 
 // Checks if the given bound DescriptorSet is still valid.
 // If so, returns it (and a lock making sure it's kept alive).
+// NOTE: returns nullptr for push descriptors.
 [[nodiscard]]
 std::pair<DescriptorSet*, std::unique_lock<LockableBase(DebugMutex)>>
 tryAccess(const BoundDescriptorSet&);
 
+// Like tryAccess but returns a ref to the state, also works for
+// push descriptors.
+[[nodiscard]]
+std::pair<DescriptorStateRef, std::unique_lock<LockableBase(DebugMutex)>>
+tryAccessState(const DescriptorState&, u32 setID);
+
 // Directly accesses the given descriptor set.
 // Asserts that it can be accessed. This method must only be used if
 // the validity of the BoundDescriptorSet is guaranteed, otherwise use
-// tryAccessLocked.
+// tryAccess.
 // ONLY USE THIS DURING SUBMISSION
 DescriptorSet& access(const BoundDescriptorSet&);
 

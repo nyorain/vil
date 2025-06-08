@@ -1,10 +1,12 @@
 #include <shader.hpp>
 #include <device.hpp>
 #include <wrap.hpp>
+#include <ds.hpp>
 #include <util/buffmt.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
+#include <threadContext.hpp>
 #include <spirv_cross.hpp>
 #include <filesystem>
 #include <optional>
@@ -580,7 +582,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 	// memory optimization:
 	// we don't need any xfb-patched data anymore
 	mod->clearXfb();
-	mod->dev->dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
+	mod->dev->dispatch.DestroyShaderModule(mod->dev->handle, shaderModule,
+		pAllocator);
 }
 
 std::optional<spc::Resource> resource(const spc::Compiler& compiler,
@@ -758,6 +761,72 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(const ShaderModule& mod,
 	specializeSpirv(*compiled, specialization, entryPoint, spvExecutionModel,
 		mod.constantDefaults);
 	return compiled;
+}
+
+// VK_EXT_shader_object
+VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
+		VkDevice                                    device,
+		uint32_t                                    createInfoCount,
+		const VkShaderCreateInfoEXT*                pCreateInfos,
+		const VkAllocationCallbacks*                pAllocator,
+		VkShaderEXT*                                pShaders) {
+	auto& dev = getDevice(device);
+
+	ThreadMemScope memScope;
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
+	auto layoutVecs = std::vector<std::vector<IntrusivePtr<DescriptorSetLayout>>>(createInfoCount);
+	for(auto [i, nci] : enumerate(ncis)) {
+		auto nLayouts = memScope.copy(nci.pSetLayouts, nci.setLayoutCount);
+		nci.pSetLayouts = nLayouts.data();
+
+		auto& cachedLayouts = layoutVecs[i];
+		for(auto& nlayout : nLayouts) {
+			auto dsLayout = getPtr(device, nlayout);
+			nlayout = dsLayout->handle;
+			cachedLayouts.push_back(std::move(dsLayout));
+		}
+	}
+
+	auto res = dev.dispatch.CreateShadersEXT(dev.handle, ncis.size(), ncis.data(),
+		pAllocator, pShaders);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pShaders[i]);
+
+		auto& mod = dev.shaderObjects.add(pShaders[i]);
+		mod.handle = pShaders[i];
+		mod.dsLayouts = std::move(layoutVecs[i]);
+		pShaders[i] = castDispatch<VkShaderEXT>(mod);
+	}
+
+	return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroyShaderEXT(
+		VkDevice                                    device,
+		VkShaderEXT                                 shader,
+		const VkAllocationCallbacks*                pAllocator) {
+	if(!shader) {
+		return;
+	}
+
+	auto shaderPtr = mustMoveUnset(device, shader);
+	shaderPtr->dev->dispatch.DestroyShaderEXT(shaderPtr->dev->handle,
+		shaderPtr->handle, pAllocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(
+		VkDevice                                    device,
+		VkShaderEXT                                 shader,
+		size_t*                                     pDataSize,
+		void*                                       pData) {
+	auto& shaderObject = get(device, shader);
+	auto& dev = *shaderObject.dev;
+	return dev.dispatch.GetShaderBinaryDataEXT(dev.handle,
+		shaderObject.handle, pDataSize, pData);
 }
 
 } // namespace vil

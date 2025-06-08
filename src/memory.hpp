@@ -145,4 +145,14 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
     VkDeviceMemory                              memory,
     VkDeviceSize*                               pCommittedMemoryInBytes);
 
+// VK_KHR_map_memory2, vulkan 1.4
+VKAPI_ATTR VkResult VKAPI_CALL MapMemory2(
+    VkDevice                                    device,
+    const VkMemoryMapInfo*                      pMemoryMapInfo,
+    void**                                      ppData);
+
+VKAPI_ATTR VkResult VKAPI_CALL UnmapMemory2(
+    VkDevice                                    device,
+    const VkMemoryUnmapInfo*                    pMemoryUnmapInfo);
+
 } // namespace vil
