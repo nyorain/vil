@@ -1,0 +1,91 @@
+#version 460
+
+// TODO: could find a way to not need this, but will
+// make code a lot more complicated (especially for non-4-byte-aligned
+// vertex strides).
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+
+#define u16 uint16_t
+#define u8 uint8_t
+
+#include "vertexCopy.glsl"
+
+layout(local_size_x = 64) in;
+
+// IndexType - set externally. Just here for linting
+// Can be u16 or uint
+#ifndef IndexType
+#define IndexType uint
+#endif // IndexType
+
+// VertexType - set externally. Just here for linting
+// Can be u8 or uint
+#ifndef VertexType
+#define VertexType uint
+#endif // VertexType
+
+layout(set = 0, binding = 0) readonly buffer Indices {
+	IndexType srcIndices[];
+};
+
+layout(set = 0, binding = 1) readonly buffer InVertices {
+	VertexType data[];
+} src;
+
+layout(set = 0, binding = 2) buffer OutVertices {
+	VertexType data[];
+} dst;
+
+layout(set = 0, binding = 3) buffer Info {
+	Metadata info;
+};
+
+layout(push_constant) uniform PCR {
+	uint vertexStride; // in VertexType units
+	uint srcBufOffset; // in VertexType units
+	uint isInstanceData;
+};
+
+void main() {
+	uint dtID = gl_GlobalInvocationID.x;
+
+	// prevent out-of-bounds writing
+	if((dtID + 1) * vertexStride > dst.data.length()) {
+		return;
+	}
+
+	// instance data has no indexing mechanism, always "resolved"
+	if(info.copyTypeOrIndexOffset == copyVertices || isInstanceData != 0) {
+		const uint idOffset = (isInstanceData != 0) ?
+			info.firstInstance :
+			(info.firstVertex + info.minIndex);
+
+		// prevent out-of-bounds reading
+		if(srcBufOffset + (dtID + idOffset + 1) * vertexStride > src.data.length()) {
+			return;
+		}
+
+		const uint dstOff = dtID * vertexStride;
+		const uint srcOff = srcBufOffset + (idOffset + dtID) * vertexStride;
+		for(uint i = 0u; i < vertexStride; ++i) {
+			dst.data[dstOff + i] = src.data[srcOff + i];
+		}
+	} else { // indexed path
+		// prevent out-of-bounds reading
+		if(info.minIndex + dtID > srcIndices.length()) {
+			return;
+		}
+
+		// NOTE: minIndex now contains the indexOffset, see writeVertexCmdIndexed
+		const uint index = info.firstVertex + uint(srcIndices[info.minIndex + dtID]);
+
+		const uint dstOff = dtID * vertexStride;
+		const uint srcOff = srcBufOffset + index * vertexStride;
+		for(uint i = 0u; i < vertexStride; ++i) {
+			dst.data[dstOff + i] = src.data[srcOff + i];
+		}
+	}
+}
+

@@ -24,6 +24,7 @@ using i64 = std::int64_t;
 using std::size_t;
 
 class Gui;
+class CommandViewer;
 struct RenderBuffer;
 
 struct Device;
@@ -61,6 +62,7 @@ struct RenderPassDesc;
 struct AccelStruct;
 struct PipelineShaderStage;
 struct DescriptorPoolSetEntry;
+struct ShaderObject;
 
 struct Queue;
 struct QueueFamily;
@@ -70,8 +72,10 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
+struct CommandHookTarget;
 struct LocalCapture;
 struct CommandHookOps;
+struct CommandHookHints;
 struct CompletedHook;
 struct DescriptorCopyOp;
 struct DescriptorCopyOp;
@@ -186,7 +190,7 @@ void onDeviceLost(Device& dev);
 } // namespace
 
 // spirv-cross
-namespace spc {
+namespace spirv_cross {
 
 class Compiler;
 struct Resource;
@@ -194,6 +198,8 @@ struct SPIRConstant;
 struct BuiltInResource;
 
 } // namespace
+
+namespace spc = spirv_cross;
 
 namespace vil::vku {
 

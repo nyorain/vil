@@ -41,6 +41,26 @@ ReversionAdatper<T> reversed(T&& iterable) {
 u32 findLSB(u32);
 u32 nextPOT(u32);
 
+template<typename T>
+bool max(T& val, const T& other) {
+	if(other > val) {
+		val = other;
+		return true;
+	}
+
+	return false;
+}
+
+template<typename T>
+bool min(T& val, const T& other) {
+	if(other < val) {
+		val = other;
+		return true;
+	}
+
+	return false;
+}
+
 /// Does not throw on error, just outputs error.
 void writeFile(const char* path, span<const std::byte> buffer, bool binary = true);
 
@@ -109,6 +129,12 @@ void ensureSize(C& container, std::size_t size) {
 	if(container.size() < size) {
 		container.resize(size);
 	}
+}
+
+template<typename Base, typename Link>
+void addChain(Base& base, Link& link) {
+	link.pNext = const_cast<void*>(base.pNext);
+	base.pNext = &link;
 }
 
 template<typename CI>
@@ -209,18 +235,24 @@ struct ShaderImageType {
 	enum Value {
 		u1,
 		u2,
+		u2MS,
 		u3,
 		i1,
 		i2,
+		i2MS,
 		i3,
 		f1,
 		f2,
+		f2MS,
 		f3,
 		count
 	};
 
 	static Value parseType(VkImageType type, VkFormat format,
-		VkImageAspectFlagBits aspect);
+		VkImageAspectFlagBits aspect, VkSampleCountFlagBits samples);
+	static bool isMS(Value value) {
+		return value == u2MS || value == i2MS || value == f2MS;
+	}
 };
 
 // TODO: bad performance due to taking string parameter. Should
@@ -322,6 +354,14 @@ T deriveCast(O* ptr) {
 	static_assert(std::is_base_of_v<O, std::remove_pointer_t<T>>);
 	dlg_assertt(("deriveCast"), !ptr || dynamic_cast<T>(ptr));
 	return static_cast<T>(ptr);
+}
+
+template<typename T, typename O>
+T deriveCast(O& obj) {
+	static_assert(std::is_reference_v<T>);
+	static_assert(std::is_base_of_v<O, std::remove_reference_t<T>>);
+	dlg_assertt(("deriveCast"), dynamic_cast<std::remove_reference_t<T>*>(&obj));
+	return static_cast<T>(obj);
 }
 
 // ValidExpression impl

@@ -1,3 +1,7 @@
+- [ ] rename vku to vpp?
+- [ ] make xfb patching also use new dynamic on-demand patching system?
+	- [ ] make that less error-prone. Completely store/forward pNext?
+- [ ] CommandHook: soft invalidate (don't invalidate state)
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
 - [ ] better deep-matching for handles, especially pipelines
@@ -23,25 +27,109 @@
 				  regions as 0? We want that for the image viewer anyways I guess.
 				  (bind memory destruction is still a problem though, handle
 				  it via tracking and waiting)
+- [ ] shader debugger: better handle input tab, don't invalidate selection
+      every time something is changed (?), make more stable
+- Vertex rework 2: electric boogaloo
+	- [x] make vertex input/output styling consistent
+	      Using buffmt for xfb looks kinda bad, revisit. Also table headers.
+		- [x] Add ID before IDX column?
+	- [ ] fix possible alignment issues in record.cpp
+	- [x] Add imgui list clipper to tables and show *whole* captured data again
+	- [x] figure out upside-down issue with iro. Flip y based on used viewport?
+	      I guess other games just flip the viewport, that's why they did not need it
+		  {solved via heuristic}
+		- [~] add "y-up-mode" to options. Can be any of the 3-axis-plus-directions
+			  by default for vertex input: y-up is y-up (although many models have z-up)
+			  default for vertex output: y-down is y-up (except when viewport is negative,
+			  then y-up is y-up).
+			  {nope, kept it simple for now}
+		- [~] hmm, y-flip isn't that useful atm, should rather be something
+		      like oneMinusY? {nope}
+	- [x] Make vertices selectable. I.e. via mouse click in table
+	- [ ] show vertex table for RT displayTriangles
+		- [ ] add support for vertex selection
+		- [ ] Make vertices selectable for RT
+	- [x] Draw selected vertex via point
+		- [x] visual: ignore depth for drawn point
+		- [x] visual: color it in some obvious color, red/blue
+	- [x] Allow to select specific vertex (either input or output) in debugger
+	- [x] Fix Recenter for top-level AccelStruct view
+	- [x] Add arcball camera controls (allow both or allow to toggle via ui)
+- vertex quality of life features:
+	- [ ] allow selecting a triangle, highlighting the three points in the table
+	- [ ] displayInstances: allow to give each instance its own color.
+	      Somehow display instances? Allow to select them.
+	- [ ] add hover data for vertex stuff. With exact formatted scalar
+	- [ ] Allow to choose display style
+		- [x] solid (single-colored or shaded) vs wireframe
+		- [x] add simple triangle-normal-based lighting (sh9 based or something)
+		- [ ] color using another input.
+		- [x] allow not clearing background of canvas, draw on blurred ui directly?
+		      looks kinda neat as well. Should probably be checkbox
+		- [ ] allow to render wireframe *and* shaded view together
+		- [ ] some more shading options? Allow to select a hdri and roughness?
+	- [ ] allow to modify canvas size. I.e. make vertically resizeable
+	- [ ] (low prio) Explicitly allow to modify what is used as position input?
+	- [ ] Allow to explicitly toggle between perspective and non-perspective projection?
+	- [ ] make perspective heuristic more robust, caused issues in past.
+	- [ ] later: Make vertex list properly page-able, allow to see *everything*
+	      without random size restrictions
+	    - [x] For this to properly work with vertex input, we might need an indirect
+		  	  copy (based on indirect draw command and indices.
+			  See vertexCopy.md
+		- [ ] For this to properly work with xfb (vertex output), we potentially
+		      need to implement draw-call splitting. Which might be a pain in the ass.
+- Really hard-match on vertexCount/indexCount for draw commands?
+  See e.g. debug drawing in iro, adding control points to a spline will
+  currently unselect the draw command. Not expected behavior.
+  Maybe just match with *really* high weight.
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission
-- [ ] continue shader debugger
-	- [ ] using some lazy copy/cow mechanism.
-	      See cow.md, should probably re-introduce cows
 - [ ] imageViewer: add overlay showing which regions are mapped
       to which memory for sparse images
-- improve vertex viewer
-	- allow to select vertices (/indices)
-		- in input and output viewer
-		- make rows selectable
-		- render the select vertex in viewport, e.g. via point pipe
-			- later: render the selected triangle?
-	- implement paging
 - [ ] investigate 255-overflow-like bug in shader debugger when
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages
+- [ ] Add "Jump to End/Begin" buttons in begin/end commands.
+      only show them in brokenLabel display mode?
+- [ ] figure out why integration test crashes on CI.
+	  execute with valgrind?
+	  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
+	  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
+	  Maybe just execute on windows? seems to work there.
+- [ ] document what to do when descriptors are not available when
+      clicking new record in UI. Implement prototype for
+	  always-ds-cow-on-submission? Should probably be toggleable.
+- [ ] clean up special descriptorSet handling in handles.cpp
+- [ ] write integration test for creating ds, updating it with imageView, destroying
+  imageView and then using ds in submission (might need partially_bound
+  or something I guess)
+- [ ] Don't always alloc/free in LinAllocator.
+      Enable our global memory block cache thingy?
+
+- [ ] support 1.4 core
+- [ ] support VK_KHR_maintenance{5, 6} (new CmdBind calls)
+- [ ] support VK_EXT_mesh_shader
+	- [ ] capture vertex input via shader patching?
+- [ ] properly support VK_EXT_shader_object
+	- [ ] remove StateCmdBase::boundPipe()
+	      Instead, introduce a ShaderState
+struct ShaderStage {
+	VkShaderStageFlagBits stage;
+	ShaderObject* shader;
+};
+
+ShaderState {
+	span<ShaderStage> stages;
+	Pipeline* pipe; // optional
+};
+
+
+low prio:
 - [ ] cleanup imageToBuffer implementation
+      {NOTE: a lot better already, mainly just missing the blit implementation.
+	   low prio now. See copy.cpp `enum class CopyMethod`}
 	- [x] for most formats (that we can read on cpu) we probably just
 	      want CmdCopyImageToBuffer
 	- [ ] some formats can't be easily read on cpu. We want support on the
@@ -57,6 +145,7 @@
 			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
 		  (3) if nothing else works, fall back to our old terrible
 		       copy to vec4[]-storage buffer solution?
+<<<<<<< HEAD
 - [x] full commandbuffer/record timings.
 	- [x] for this we need proper prefix-matching support in CommandHook. WIP
 	- [ ] also full batch timings?
@@ -94,25 +183,12 @@
 - [ ] Would be useful to have the side-by-side-frames-with-vizlcs
 	  debug view via record serialization (among other things).
 	  {for later}
+=======
+>>>>>>> 1dbd66b (Continue vertex viewer)
 
 - look into found doom performance hotpaths
 	- Improve QueuePresent timing
 	- analyze other issues, tracy file on D:
-- Clean up Handle (?)
-	- remove objectType from Handle
-	- could remove 'name' from Handle, instead use HashMap in device?
-	  not sure if this is a good idea though. Probably not for now.
-	  our main usecase after all is application debugging where we
-	  expect most handles to have a name -> embedding in object makes sense.
-- Clean up DeviceHandle (?)
-	- In many handles we don't need the 'dev' pointer, e.g. descriptorSet,
-	  imageView etc. Remove it?
-	- Instead use DeviceHandle<ObjectType>, allowing to remove objectType from Handle
-	  In its destructor, pass the objectType to the destruction notification
-	- descriptorSet should not derive from DeviceHandle, does not need refRecords
-	- Maybe rename DeviceHandle to RecordReferenced or something?
-		- split up notifyDestruction functionality in DeviceObserved or something,
-		  many classes (like Fence, CommandPool etc) don't need refRecords I guess
 - check if we can get the null vulkan driver running and execute tests
 	- just create images/buffers with various parameters and record submissions,
 	  recording every command at least once.

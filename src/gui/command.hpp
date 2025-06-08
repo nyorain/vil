@@ -45,6 +45,7 @@ public:
 	void updateFromSelector(bool forceUpdateHook);
 
 	auto& vertexViewer() { return vertexViewer_; }
+	void selectShaderDebugger(const Pipeline& pipe, const Vec3ui& invocation = {});
 
 private:
 	Device& dev() const;
@@ -105,7 +106,7 @@ private:
 
 			// image view state
 			// buffer view state
-			VkShaderStageFlagBits stage;
+			unsigned stage;
 		} ds;
 
 		struct {

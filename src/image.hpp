@@ -121,6 +121,13 @@ VKAPI_ATTR VkResult VKAPI_CALL GetImageDrmFormatModifierPropertiesEXT(
     VkImage                                     image,
     VkImageDrmFormatModifierPropertiesEXT*      pProperties);
 
+// maintenance5, vulkan1.4
+VKAPI_ATTR void VKAPI_CALL GetImageSubresourceLayout2(
+    VkDevice                                    device,
+    VkImage                                     image,
+    const VkImageSubresource2*                  pSubresource,
+    VkSubresourceLayout2*                       pLayout);
+
 // imageView
 VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
     VkDevice                                    device,

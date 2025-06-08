@@ -23,7 +23,6 @@ struct Decoration {
 	using Flags = nytl::Flags<Bits>;
 
 	std::string_view name {};
-	u32 offset {}; // for members; offset in struct
 	// TODO: for multidim arrays, each dimension might have a non-tight
 	// arrayStride in spirv i guess? In Vulkan, the stride for the
 	// dimension >= 1 won't be non-tight but we might still want to
@@ -31,9 +30,12 @@ struct Decoration {
 	// dimension (i.e. how large is one element in the array).
 	u32 arrayStride {};
 	u32 matrixStride {};
+	u32 typeID {};
+	u32 arrayTypeID {};
 	Flags flags {};
 };
 
+NYTL_FLAG_OPS(Decoration::Bits);
 static_assert(std::is_trivially_destructible_v<Decoration>);
 
 // TODO: rename or move to namespace, kinda unfitting here.
@@ -52,13 +54,13 @@ struct Type {
 	u32 vecsize {1};
 	// Set to 0 for runtime array.
 	span<u32> array {};
-	u32 width;
+	u32 width {};
 
 	Decoration deco;
 
 	struct Member {
 		std::string_view name;
-		const Type* type;
+		Type* type;
 		u32 offset;
 	};
 
@@ -70,6 +72,16 @@ static_assert(std::is_trivially_destructible_v<Type::Member>);
 
 void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
+
+// Display a single value from a non-struct type with imgui.
+void displayAtomValue(const Type& type, ReadBuf data, u32 offset);
+
+struct FormattedScalar {
+	std::string scalar;
+	std::string error {};
+};
+
+FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset, u32 precision);
 
 enum class BufferLayout {
 	std140,

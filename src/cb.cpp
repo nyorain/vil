@@ -75,7 +75,8 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	// There may be errors here.
 	// TODO PERF: do we even need to track it like this? only useful if we
 	// also show it in UI which sets were disturbed.
-	// Disabled for now
+	// Disabled for now. When enabling this again, would need to fix
+	// it for push descriptors!
 
 // #define DS_DISTURB_CHECKS
 #ifdef DS_DISTURB_CHECKS
@@ -112,7 +113,6 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
 		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);
-		dynOffsets.subspan(dsLayout.numDynamicBuffers);
 	}
 
 #ifdef DS_DISTURB_CHECKS
@@ -585,7 +585,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
 		inherit = *pBeginInfo->pInheritanceInfo;
 
-		auto* dynRender = LvlFindInChain<
+		auto* dynRender = lvl_find_in_chain<
 			VkCommandBufferInheritanceRenderingInfo>(inherit.pNext);
 		if(pBeginInfo->pInheritanceInfo->renderPass) {
 			// get render pass
@@ -656,6 +656,7 @@ struct GetUsedSet {
 	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
 	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
 	static auto& get(CommandRecord& rec, const DescriptorPool&) { return rec.used.dsPools; }
+	static auto& get(CommandRecord& rec, const ShaderObject&) { return rec.used.shaderObjects; }
 };
 
 template<typename T>
@@ -1101,6 +1102,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		const uint32_t*                             pDynamicOffsets) {
 	ExtZoneScoped;
 
+	// NOTE: code duplication with CmdBindDescriptorSets2
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
 
@@ -1108,12 +1110,6 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	cmd.pipeBindPoint = pipelineBindPoint;
 	cmd.dynamicOffsets = copySpan(cb, pDynamicOffsets, dynamicOffsetCount);
 
-	// NOTE: the pipeline layout is intetionally not added to used handles
-	// since the application not destroying it does not move the command
-	// buffer into invalid state (and vulkan requires that it's kept
-	// alive while recording).
-	// Since we might need it later on, we acquire shared ownership.
-	// Also like this in CmdPushConstants
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cmd.sets = alloc<DescriptorSet*>(cb, descriptorSetCount);
@@ -1131,18 +1127,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		useHandle(cb, cmd, ds);
 	}
 
-	// TODO: not sure about this. The spec isn't clear about this.
-	// But this seems to be what the validation layers do.
-	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
-	// if(cb.pushConstants.layout &&
-	// 		!pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
-	// 	cb.pushConstants.layout = nullptr;
-	// 	cb.pushConstants.map.clear();
-	// }
-
-	// TODO(perf): we probably don't want to track all this invalidation stuff
-	// not meaningful in UI, we should just assume it's valid.
-	// Then we also don't need to track the pipeline layout
+	// NOTE: could check for incompatible layout here and clear push constants.
+	// But we don't gain anything by tracking this.
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
@@ -1176,22 +1162,29 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset,
 		VkIndexType                                 indexType) {
+	// NOTE: code duplication with CmdBindIndexBuffer2
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindIndexBufferCmd>(cb);
+	auto& gs = cb.newGraphicsState();
 
-	auto& buf = get(*cb.dev, buffer);
-	cmd.buffer = &buf;
-	useHandle(cb, cmd, buf);
+	if (buffer) { // nullDescriptor allows null buffer
+		auto& buf = get(*cb.dev, buffer);
+		cmd.buffer = &buf;
+		useHandle(cb, cmd, buf);
+
+		gs.indices.buffer = &buf;
+		buffer = buf.handle;
+	}
 
 	cmd.offset = offset;
 	cmd.indexType = indexType;
 
-	auto& gs = cb.newGraphicsState();
-	gs.indices.buffer = &buf;
 	gs.indices.offset = offset;
 	gs.indices.type = indexType;
 
-	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle, buf.handle, offset, indexType);
+	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle, buffer, offset, indexType);
 }
 
 span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
@@ -1237,6 +1230,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		uint32_t                                    bindingCount,
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	ThreadMemScope tms;
 	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
@@ -2291,59 +2286,6 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	pc = alloc<std::byte>(cb, allocSize);
 	std::memcpy(pc.data() + offset, pValues, size);
 
-	// TODO: improve pcr tracking
-	// not sure about this. The spec isn't clear about this.
-	// But this seems to be what the validation layers do.
-	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
-	// if(cb.pushConstants.layout &&
-	// 		!pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
-	// 	cb.pushConstants.layout = nullptr;
-	// 	cb.pushConstants.map.clear();
-	// }
-	// cb.pushConstants.layout = cmd.layout.get();
-	/*
-	for(auto i = 0u; i < 32; ++i) {
-		if((stageFlags & (1 << i)) == 0) {
-			continue;
-		}
-
-		auto& pc = cb.pushConstants.map[VkShaderStageFlagBits(1 << i)];
-		ensureSize(cb, pc.data, offset + size);
-		std::memcpy(pc.data.data() + offset, pValues, size);
-
-		auto it = pc.ranges.begin();
-		for(; it != pc.ranges.end(); ++it) {
-			if(it->first < offset) {
-				continue;
-			} else if(it->first == offset) {
-				if(it->second < size) {
-					it->second = size;
-				}
-			} else if(it->first + it->second == offset) {
-				it->second += size;
-			} else if(it->first > offset) {
-				it = pc.ranges.insert(it, {offset, size});
-			}
-
-			// merge following ranges
-			for(auto iit = ++it; it != pc.ranges.end();) {
-				if(iit->first > it->first + it->second) {
-					break;
-				}
-
-				it->second = std::max(it->second, iit->first + iit->second - offset);
-				iit = pc.ranges.erase(iit);
-			}
-
-			break;
-		}
-
-		if(it == pc.ranges.end()) {
-			pc.ranges.push_back({offset, size});
-		}
-	}
-	*/
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdPushConstants(cb.handle, cmd.pipeLayout->handle,
@@ -2507,25 +2449,44 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 	cb.dev->dispatch.CmdSetStencilReference(cb.handle, faceMask, reference);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
-		VkCommandBuffer                             commandBuffer,
-		VkPipelineBindPoint                         pipelineBindPoint,
-		VkPipelineLayout                            layout,
-		uint32_t                                    set,
-		uint32_t                                    descriptorWriteCount,
-		const VkWriteDescriptorSet*                 pDescriptorWrites) {
-	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<PushDescriptorSetCmd>(cb);
-	cmd.bindPoint = pipelineBindPoint;
-	cmd.set = set;
-	cmd.descriptorWrites = copySpan(cb, pDescriptorWrites, descriptorWriteCount);
+void handlePushDescriptors(CommandBuffer& cb, PushDescriptorSetCmd& cmd,
+		DescriptorSetLayout& dsLayout,
+		span<DescriptorState> states) {
 
-	// TODO: need to track the state in graphicsState/computeState.
+	dlg_assert(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
+	dlg_assert(dsLayout.bindings.empty() ||
+		!(dsLayout.bindings.back().flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
+	auto neededSize = totalDescriptorMemSize(dsLayout, 0u);
 
-	// deep-copy cmd.descriptorWrites.
-	// The allocation done by copySpan is bound to the lifetime of the record
-	// and we don't need to store the span itself anywhere since we don't
-	// directly have ownership
+	ThreadMemScope tms;
+	auto descriptorStates = tms.alloc<DescriptorStateRef>(states.size());
+	for(auto [i, state] : enumerate(states)) {
+		state.descriptorSets = copyEnsureSizeUndef(cb,
+			state.descriptorSets, cmd.set + 1);
+
+		auto& dstSet = state.descriptorSets[cmd.set];
+
+		// NOTE: technically, we should clear the span every time the
+		// layout changes. But we don't gain anything from this tracking,
+		// applications have to bind everything.
+		dlg_assert(bool(dstSet.dsEntry) == bool(dstSet.dsPool));
+		dlg_assert(dstSet.layout || !dstSet.dsPool);
+
+		if (!dstSet.dsPool && dstSet.layout && neededSize == dstSet.pushDescriptors.size()) {
+			dstSet.pushDescriptors = copySpan(cb, dstSet.pushDescriptors);
+		} else {
+			// force invalidation here
+			dstSet.pushDescriptors = alloc<std::byte>(cb, neededSize);
+			dstSet = {};
+		}
+
+		dstSet.layout = cmd.pipeLayout;
+
+		descriptorStates[i].data = dstSet.pushDescriptors.data();
+		descriptorStates[i].layout = &dsLayout;
+		descriptorStates[i].variableDescriptorCount = 0u;
+	}
+
 	for(auto& write : cmd.descriptorWrites) {
 		write.pNext = copyChain(cb, write.pNext);
 		if(!write.descriptorCount) {
@@ -2541,6 +2502,13 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 					copies[i] = write.pBufferInfo[i];
 					copies[i].buffer = buf.handle;
 					useHandle(cb, cmd, buf);
+
+					for(auto& dstState : descriptorStates) {
+						auto dstImages = buffers(dstState, write.dstBinding);
+						dstImages[write.dstArrayElement + i].buffer = &buf;
+						dstImages[write.dstArrayElement + i].offset = copies[i].offset;
+						dstImages[write.dstArrayElement + i].range = copies[i].range;
+					}
 				}
 				write.pBufferInfo = copies.data();
 				break;
@@ -2549,15 +2517,24 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 				auto copies = alloc<VkDescriptorImageInfo>(cb, write.descriptorCount);
 				for(auto i = 0u; i < write.descriptorCount; ++i) {
 					copies[i] = write.pImageInfo[i];
+					ImageView* iv {};
+					Sampler* sampler {};
 					if(copies[i].imageView) {
-						auto& iv = get(*cb.dev, write.pImageInfo[i].imageView);
-						copies[i].imageView = iv.handle;
-						useHandle(cb, cmd, iv);
+						iv = &get(*cb.dev, write.pImageInfo[i].imageView);
+						copies[i].imageView = iv->handle;
+						useHandle(cb, cmd, *iv);
 					}
 					if(copies[i].sampler) {
-						auto& sampler = get(*cb.dev, write.pImageInfo[i].sampler);
-						copies[i].sampler = sampler.handle;
-						useHandle(cb, cmd, sampler);
+						sampler = &get(*cb.dev, write.pImageInfo[i].sampler);
+						copies[i].sampler = sampler->handle;
+						useHandle(cb, cmd, *sampler);
+					}
+
+					for(auto& dstState : descriptorStates) {
+						auto dstImages = images(dstState, write.dstBinding);
+						dstImages[write.dstArrayElement + i].imageView = iv;
+						dstImages[write.dstArrayElement + i].sampler = sampler;
+						dstImages[write.dstArrayElement + i].layout = copies[i].imageLayout;
 					}
 				}
 				write.pImageInfo = copies.data();
@@ -2569,25 +2546,83 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 					auto& bv = get(*cb.dev, write.pTexelBufferView[i]);
 					copies[i] = bv.handle;
 					useHandle(cb, cmd, bv);
+
+					for(auto& dstState : descriptorStates) {
+						auto dstBufViews = bufferViews(dstState, write.dstBinding);
+						dstBufViews[write.dstArrayElement + i].bufferView = &bv;
+					}
 				}
 				write.pTexelBufferView = copies.data();
+				break;
+			} case DescriptorCategory::accelStruct: {
+				// write.pNext was already copied above, can safely modify it.
+				auto* accelStructWrite = (VkWriteDescriptorSetAccelerationStructureKHR*) findChainInfo2<
+					VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR>(write.pNext);
+				dlg_assert(accelStructWrite);
+
+				auto copies = alloc<VkAccelerationStructureKHR>(cb, write.descriptorCount);
+				for(auto i = 0u; i < write.descriptorCount; ++i) {
+					dlg_assert(i < accelStructWrite->accelerationStructureCount);
+					auto& as = get(*cb.dev, accelStructWrite->pAccelerationStructures[i]);
+					copies[i] = as.handle;
+					useHandle(cb, cmd, as);
+
+					for(auto& dstState : descriptorStates) {
+						auto dstAccelStructs = accelStructs(dstState, write.dstBinding);
+						dstAccelStructs[write.dstArrayElement + i].accelStruct = &as;
+					}
+				}
+				accelStructWrite->pAccelerationStructures = copies.data();
+				break;
+			} case DescriptorCategory::inlineUniformBlock: {
+				// VUID-VkDescriptorSetLayoutCreateInfo-flags-02208
+				dlg_error("Inline uniform block in push descriptor not supported");
 				break;
 			} default:
 				dlg_error("Invalid/unknown descriptor type");
 				break;
 		}
 	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipelineLayout                            layout,
+		uint32_t                                    set,
+		uint32_t                                    descriptorWriteCount,
+		const VkWriteDescriptorSet*                 pDescriptorWrites) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<PushDescriptorSetCmd>(cb);
+	cmd.bindPoint = pipelineBindPoint;
+	cmd.set = set;
+	cmd.descriptorWrites = copySpan(cb, pDescriptorWrites, descriptorWriteCount);
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	useHandle(cb, cmd, *cmd.pipeLayout);
 
-	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle,
+	span<DescriptorState> refs {};
+
+	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+		refs = {&cb.newComputeState(), 1u};
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+		refs = {&cb.newGraphicsState(), 1u};
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
+		refs = {&cb.newRayTracingState(), 1u};
+	} else {
+		dlg_error("Unknown pipeline bind point");
+	}
+
+	auto& dsLayout = *pipeLayoutPtr->descriptors[set];
+	handlePushDescriptors(cb, cmd, dsLayout, refs);
+
+	cb.dev->dispatch.CmdPushDescriptorSet(cb.handle,
 		pipelineBindPoint, cmd.pipeLayout->handle, set,
 		descriptorWriteCount, cmd.descriptorWrites.data());
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplate(
 		VkCommandBuffer                             commandBuffer,
 		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
 		VkPipelineLayout                            layout,
@@ -2676,7 +2711,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 	}
 
 	cmd.data = copied;
-	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(cb.handle,
+	cb.dev->dispatch.CmdPushDescriptorSetWithTemplate(cb.handle,
 		dut.handle, cmd.pipeLayout->handle, set, cmd.data.data());
 }
 
@@ -2718,7 +2753,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
 	cb.dev->dispatch.CmdEndConditionalRenderingEXT(cb.handle);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetLineStipple(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    lineStippleFactor,
 		uint16_t                                    lineStipplePattern) {
@@ -2727,7 +2762,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
 	cmd.stippleFactor = lineStippleFactor;
 	cmd.stipplePattern = lineStipplePattern;
 
-	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle, lineStippleFactor, lineStipplePattern);
+	cb.dev->dispatch.CmdSetLineStipple(cb.handle, lineStippleFactor, lineStipplePattern);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetCullMode(
@@ -3455,6 +3490,174 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawMultiIndexedEXT(
 			drawCount, pIndexInfo, instanceCount, firstInstance, stride,
 			pVertexOffset);
 	}
+}
+
+// VK_EXT_shader_object
+VKAPI_ATTR void VKAPI_CALL CmdBindShadersEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    stageCount,
+		const VkShaderStageFlagBits*                pStages,
+		const VkShaderEXT*                          pShaders) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindShadersCmd>(cb, cb);
+	cmd.stages = copySpan(cb, pStages, stageCount);
+	cmd.shaders = alloc<ShaderObject*>(cb, stageCount);
+
+	ThreadMemScope tms;
+	auto vkShaders = tms.alloc<VkShaderEXT>(stageCount);
+
+	for(auto i = 0u; i < stageCount; ++i) {
+		auto& shader = get(*cb.dev, pShaders[i]);
+		useHandle(cb, cmd, shader);
+
+		cmd.shaders[i] = &shader;
+		vkShaders[i] = shader.handle;
+	}
+
+	cb.dev->dispatch.CmdBindShadersEXT(cb.handle,
+		stageCount, pStages, vkShaders.data());
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthClampRangeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkDepthClampModeEXT                         depthClampMode,
+		const VkDepthClampRangeEXT*                 pDepthClampRange) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthClampRangeCmd>(cb, cb);
+	cmd.mode = depthClampMode;
+	if(pDepthClampRange) {
+		cmd.range = *pDepthClampRange;
+	}
+
+	cb.dev->dispatch.CmdSetDepthClampRangeEXT(cb.handle,
+		depthClampMode, pDepthClampRange);
+}
+
+// VK_KHR_maintenance5
+VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer2(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		VkDeviceSize                                size,
+		VkIndexType                                 indexType) {
+	ExtZoneScoped;
+
+	// NOTE: code duplication with CmdBindIndexBuffer
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindIndexBufferCmd>(cb);
+	auto& gs = cb.newGraphicsState();
+
+	if (buffer) { // null_descriptor allows null buffer
+		auto& buf = get(*cb.dev, buffer);
+		cmd.buffer = &buf;
+		useHandle(cb, cmd, buf);
+
+		gs.indices.buffer = &buf;
+		buffer = buf.handle;
+	}
+
+	cmd.offset = offset;
+	cmd.indexType = indexType;
+	cmd.size = size;
+
+	gs.indices.offset = offset;
+	gs.indices.type = indexType;
+
+	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle, buffer, offset, indexType);
+}
+
+// VK_KHR_maintenance6, Vulkan 1.4
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(
+		VkCommandBuffer                             commandBuffer,
+		const VkBindDescriptorSetsInfo*             pBindDescriptorSetsInfo) {
+	ExtZoneScoped;
+
+	dlg_assert(!pBindDescriptorSetsInfo->pNext);
+
+	// NOTE: code duplication with CmdBindDescriptorSets2
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
+	auto info = *pBindDescriptorSetsInfo;
+
+	cmd.firstSet = info.firstSet;
+	cmd.stageFlags = info.stageFlags;
+	cmd.dynamicOffsets = copySpan(cb, info.pDynamicOffsets, info.dynamicOffsetCount);
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, info.layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	cmd.sets = alloc<DescriptorSet*>(cb, info.descriptorSetCount);
+
+	useHandle(cb, cmd, *pipeLayoutPtr);
+
+	ThreadMemScope memScope;
+	auto setHandles = memScope.allocUndef<VkDescriptorSet>(info.descriptorSetCount);
+	for(auto i = 0u; i < info.descriptorSetCount; ++i) {
+		auto& ds = get(*cb.dev, info.pDescriptorSets[i]);
+
+		cmd.sets[i] = &ds;
+		setHandles[i] = ds.handle;
+
+		useHandle(cb, cmd, ds);
+	}
+
+	info.pDescriptorSets = setHandles.data();
+
+	// NOTE: could check for incompatible layout here and clear push constants.
+	// But we don't gain anything by tracking this.
+
+	// update bound state
+	constexpr auto graphicsStages = VK_SHADER_STAGE_ALL_GRAPHICS |
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	constexpr auto rtStages =
+		VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+		VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+		VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+		VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
+		VK_SHADER_STAGE_CALLABLE_BIT_KHR |
+		VK_SHADER_STAGE_MISS_BIT_KHR;
+
+	// TODO: not sure if this is correct, spec is unclear
+	if(info.stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) {
+		cb.newComputeState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
+	}
+	if(info.stageFlags & graphicsStages) {
+		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
+	}
+	if(info.stageFlags & rtStages) {
+		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
+	}
+
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdBindDescriptorSets2(cb.handle, &info);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(
+		VkCommandBuffer                             commandBuffer,
+		const VkPushConstantsInfo*                  pPushConstantsInfo) {
+	ExtZoneScoped;
+
+	dlg_assert(!
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet2(
+		VkCommandBuffer                             commandBuffer,
+		const VkPushDescriptorSetInfo*              pPushDescriptorSetInfo) {
+	ExtZoneScoped;
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplate2(
+		VkCommandBuffer                             commandBuffer,
+		const VkPushDescriptorSetWithTemplateInfo*  pPushDescriptorSetWithTemplateInfo) {
+	ExtZoneScoped;
 }
 
 } // namespace vil

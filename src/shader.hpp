@@ -13,31 +13,29 @@
 
 namespace vil {
 
+// buffmt.hpp
+struct Type;
+
 struct ShaderSpecialization {
 	std::vector<VkSpecializationMapEntry> entries;
 	std::vector<std::byte> data {};
+
+	VkSpecializationInfo vkInfo() const;
 };
 
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo*);
 bool operator==(const ShaderSpecialization& a, const ShaderSpecialization& b);
 
-// TODO: should probably make this re-use buffmt
 struct XfbCapture {
-	enum Type {
-		typeFloat,
-		typeInt,
-		typeUint,
-	};
+	~XfbCapture(); // = default
+	XfbCapture(XfbCapture&&) noexcept = default;
+	XfbCapture& operator=(XfbCapture&&) noexcept = default;
 
-	Type type;
-	u32 columns {1};
-	u32 vecsize {1};
-	std::vector<u32> array {};
-	u32 width;
-
+	std::unique_ptr<Type> type;
 	std::optional<u32> builtin {}; // spv11::Builtin, may be 0
 	std::string name; // might be empty
 	u32 offset; // total offset into xfb buffer
+	std::vector<u32> arrayVals; // for type.array
 };
 
 // We separate the description from the patched VkShaderModule since the description
@@ -125,9 +123,16 @@ struct ShaderModule : SharedDeviceHandle {
 spc::Compiler& specializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
-std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(const ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
+
+struct ShaderObject : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SHADER_EXT;
+
+	VkShaderEXT handle {};
+	std::vector<IntrusivePtr<DescriptorSetLayout>> dsLayouts;
+};
 
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
@@ -140,5 +145,24 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
     VkDevice                                    device,
     VkShaderModule                              shaderModule,
     const VkAllocationCallbacks*                pAllocator);
+
+// VK_EXT_shader_object
+VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
+    VkDevice                                    device,
+    uint32_t                                    createInfoCount,
+    const VkShaderCreateInfoEXT*                pCreateInfos,
+    const VkAllocationCallbacks*                pAllocator,
+    VkShaderEXT*                                pShaders);
+
+VKAPI_ATTR void VKAPI_CALL DestroyShaderEXT(
+    VkDevice                                    device,
+    VkShaderEXT                                 shader,
+    const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(
+    VkDevice                                    device,
+    VkShaderEXT                                 shader,
+    size_t*                                     pDataSize,
+    void*                                       pData);
 
 } // namespace vil

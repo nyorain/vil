@@ -22,6 +22,12 @@ the layer works internally. Useful mainly for development on it.
 	  minimal and the overall layer lightweight.
 	- `pml`: [pml](https://github.com/nyorain/pml) is a lightweight C posix main loop.
 	  Dependency of swa on unix.
+	- `spc`: Source of a custom [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) fork.
+	  We use it for SPIR-V reflection and patching. Our custom fork has
+	  extended features that make patching of shaders easier without doing
+	  a lot of duplicate work. We rely on this module instead of writing
+	  it from scratch since it is well maintained and implements important
+	  functionality such as evaluating specialization constants.
 - `src`: pretty much all source codes and non-public headers go here
 	- `command`: for all command-related utility
 	- `util`: utility headers that are not directly involved with the vulkan API
@@ -52,17 +58,6 @@ the layer works internally. Useful mainly for development on it.
 	  We compile it directly into the layer library.
 	- `tracy`: Source of the profiling tool we use, directly baked into the library.
 	  See [performance.md](docs/performance.md) for more details on profiling.
-	- `spirv-cross`: Source of [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross).
-	  We use it for SPIR-V reflection and patching. As of may 2021, we still use 
-	  spriv-reflect in most places but this will likely be replaced with
-	  SPIRV-Cross. We need SPIRV-cross for the xfb patching we have to do
-	  for the vertex viewer, doing this can involve things such as evaluating
-	  (spec-)constant shader expressions (e.g. array sizes) which isn't something
-	  we want to implement ourselves in the layer.
-	- `spvm`: Contains sources for the [SPIRV-VM](https://github.com/dfranx/SPIRV-VM)
-	  library vil uses for shader debugging. We should probably move that
-	  to a git subproject sooner or later since we often need to change/extend/fix
-	  it during development.
 	- `minhook`: sources of the [minhook library](https://github.com/TsudaKageyu/minhook).
 	  Used only for the hooked win32 overlay, to grab/block input from
 	  the application.
@@ -70,27 +65,27 @@ the layer works internally. Useful mainly for development on it.
 	  [backward library](https://github.com/bombela/backward-cpp) used to
 	  capture stack traces
 	- `tao/pegtl`: We use the [tao/pegtl](https://github.com/taocpp/PEGTL) library
-	  to parse expressions. Used for instance by the buffer viewer to convert a 
-	  glsl-like type specification to an internal type representation used to 
+	  to parse expressions. Used for instance by the buffer viewer to convert a
+	  glsl-like type specification to an internal type representation used to
 	  format buffer content, see [src/util/bufparser.cpp](src/util/bufparser.cpp).
 	- `test/unit`: To test the functions and classes not exported from the layer,
 	  we compile the tests directly into the shared library (when tests
 	  are enabled, they are off by default, but always run on the CI).
 	  The tests compiled into the shared library are defined in this folder.
 	  We compile them into the library itself so we can test functions that
-	  are not exported. 
+	  are not exported.
 	  We also have a `main.cpp` here that is able to execute the tests.
 	  Unit tests are mainly for internal utility.
 	- `test/integration`: We have some integration tests here.
 	  They just use Vulkan like any app would, with the vil layer loaded.
-	  Preferably, and to make this work easily in CI, we use the null Vulkan 
+	  Preferably, and to make this work easily in CI, we use the null Vulkan
 	  mock_icd driver but load the validation layers *after* vil to make sure it
 	  catches our errors.
 - `include`: Only the public API header lives here. Future API or otherwise public
   headers should go here.
 - `docs`: Documentation, examples, pictures. The `own` subfolder contains
   many incredibly smart concepts, ideas and design documents disguised as
-  error-ridden gibberish with spelling errors, rhetorical questions and 
+  error-ridden gibberish with spelling errors, rhetorical questions and
   inconsistencies. There you will also find the ever-growing todo list.
 
 ## Code organization
@@ -117,15 +112,15 @@ For almost every vulkan handle, there is a representation on our side.
 `VkImageView` by `vil::ImageView` and so on.
 
 `vil::Device` has tables mapping the vulkan handles to their
-representations inside the layer. For dispatchable handles (Instance, Device, 
-CommandBuffer, Queue; we also use it for VkSurfaceKHR), there is a global 
+representations inside the layer. For dispatchable handles (Instance, Device,
+CommandBuffer, Queue; we also use it for VkSurfaceKHR), there is a global
 table in [src/data.hpp](src/data.hpp).
 
 The layer optionally wraps handles, see (env.md)[docs/env.md] for configuration, it's
 even possible to decide on a per-object-type basis whether wrapping is done.
 See [this post](https://renderdoc.org/vulkan-layer-guide.html) for more details
 on handle wrapping.
-Wrapping handles allows us to bypass those (potentially large, synchronized) 
+Wrapping handles allows us to bypass those (potentially large, synchronized)
 global or per-device lookup tables and instead directly cast into
 our representation of the handles. But it also decreases the chance that the
 layer works with extensions it does not explicitly support.
@@ -155,7 +150,7 @@ to a DescriptorSet to make sure we can view its state at a current point
 in time later on, even if the DescriptorSet was destroyed or updated.
 
 In general, we keep track of some connections between handles where
-performance allows it to make it possible to view them in the gui. 
+performance allows it to make it possible to view them in the gui.
 While the gui is rendered, it will lock the device mutex in many places
 when accessing these connections.
 
@@ -168,7 +163,7 @@ to call queue operations from multiple threads at the same time).
 API objects created by the application generally have an object counterpart
 inside the layer, e.g. [vil::Image](src/image.hpp), [vil::DescriptorSet](src/ds.hpp),
 [vil::CommandBuffer](src/cb.hpp), or [vil::Device](src/device.hpp).
-They all derive from [vil::Handle](src/handle.hpp) which just knows its 
+They all derive from [vil::Handle](src/handle.hpp) which just knows its
 own debug name.
 
 Many device-level handles have an embedded, intrusive, atomic reference
@@ -206,14 +201,14 @@ these objects for multiple purposes:
 
 ## CommandRecord
 
-`vil::CommandRecord` (see [record.hpp](src/command/record.hpp)) holds all state for a 
+`vil::CommandRecord` (see [record.hpp](src/command/record.hpp)) holds all state for a
 recorded command buffer, i.e.
 all commands, the usage flags with which the record was begun, which handles are used.
 It's disconnected from the command buffer itself and can outlive it. You can imagine
 the CommandBuffer as a builder for CommandRecord object.
-CommandRecords are used in multiple places and ownership is shared via an 
+CommandRecords are used in multiple places and ownership is shared via an
 intrusive reference count.
-One speciality is its custom memory allocation mechanism, see 
+One speciality is its custom memory allocation mechanism, see
 [linalloc.hpp](src/util/linalloc.hpp) and [command/alloc.hpp](src/command/alloc.hpp).
 Since CommandBuffer recording can be a bottleneck and might involve many thousands
 commands, we don't have any time to waste there. Therefore, we always allocate larger
@@ -230,8 +225,8 @@ commands into the submissions done by the application.
 A `CommandHook` can be installed in the `vil::Device` and will be considered
 every time commands are submitted to a queue of that device via
 `CommandHook::hook`. That function gets a submission to a queue
-and can replace command buffers with internal, patched replacements. 
-To "insert" commands, it simply reads from the recorded command buffer 
+and can replace command buffers with internal, patched replacements.
+To "insert" commands, it simply reads from the recorded command buffer
 (using our `vil::Command` objects created at recording time), records the commands
 into an internally created command, adding or altering commands as needed.
 The reason we don't already do this directly into the application's command
@@ -257,7 +252,7 @@ All that state is hold in `CommandHookState`, which is directly accessed
 when rendering the command buffer gui.
 
 Aside from copying state at a selected command, we also use `CommandHook`
-to capture bookkeeping data when needed, for instance in 
+to capture bookkeeping data when needed, for instance in
 `vkCmdBuildAccelerationStructuresKHR`.
 
 ### Render pass splitting
@@ -287,7 +282,7 @@ See [src/rp.hpp](src/rp.hpp) for the details. `vil::splittable(...)` returns
 whether the splitting approach is possible for the given render pass
 description. We have a small test [rpsplit.cpp](docs/test/rpsplit.cpp) that
 should be extended when issues with that are found in the future.
-`vil::splitIterrutable(...)` then spits out render pass create infos 
+`vil::splitIterrutable(...)` then spits out render pass create infos
 that can be used to create the new render passes.
 
 ### TODO:

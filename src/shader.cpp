@@ -1,10 +1,13 @@
 #include <shader.hpp>
 #include <device.hpp>
 #include <wrap.hpp>
+#include <ds.hpp>
+#include <util/buffmt.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <threadContext.hpp>
+#include <spirv_cross.hpp>
 #include <filesystem>
 #include <optional>
 
@@ -12,6 +15,8 @@
 // #define VIL_OUTPUT_PATCHED_SPIRV
 
 namespace vil {
+
+XfbCapture::~XfbCapture() = default;
 
 // util
 std::string extractString(span<const u32> spirv) {
@@ -29,6 +34,15 @@ std::string extractString(span<const u32> spirv) {
 
 	dlg_error("Unterminated SPIR-V string");
 	return {};
+}
+
+VkSpecializationInfo ShaderSpecialization::vkInfo() const {
+	VkSpecializationInfo ret {};
+	ret.dataSize = data.size();
+	ret.pData = data.data();
+	ret.mapEntryCount = entries.size();
+	ret.pMapEntries = entries.data();
+	return ret;
 }
 
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo* info) {
@@ -98,38 +112,41 @@ bool isOpInSection8(spv11::Op op) {
 	}
 }
 
-u32 baseTypeSize(const spc::SPIRType& type, XfbCapture& cap) {
+// Returns the base type size
+u32 fillInType(const spc::SPIRType& type, XfbCapture& cap) {
 	dlg_assert(!type.pointer);
+	dlg_assert(!cap.type);
+	cap.type = std::make_unique<Type>();
 
 	switch(type.basetype) {
 		case spc::SPIRType::Float:
 		case spc::SPIRType::Half:
 		case spc::SPIRType::Double:
-			cap.type = XfbCapture::typeFloat;
+			cap.type->type = Type::typeFloat;
 			break;
 
 		case spc::SPIRType::UInt:
 		case spc::SPIRType::UInt64:
 		case spc::SPIRType::UByte:
 		case spc::SPIRType::UShort:
-			cap.type = XfbCapture::typeUint;
+			cap.type->type = Type::typeUint;
 			break;
 
 		case spc::SPIRType::Int:
 		case spc::SPIRType::Int64:
 		case spc::SPIRType::SByte:
 		case spc::SPIRType::Short:
-			cap.type = XfbCapture::typeInt;
+			cap.type->type = Type::typeInt;
 			break;
 
 		default:
 			dlg_assert("Invalid type");
-			return u32(-1);
+			return u32(0);
 	}
 
-	cap.width = type.width;
-	cap.columns = type.columns;
-	cap.vecsize = type.vecsize;
+	cap.type->width = type.width;
+	cap.type->columns = type.columns;
+	cap.type->vecsize = type.vecsize;
 
 	return type.vecsize * type.columns * (type.width / 8);
 }
@@ -175,7 +192,7 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 		}
 
 		XfbCapture cap {};
-		auto baseSize = baseTypeSize(mtype, cap);
+		auto baseSize = fillInType(mtype, cap);
 		if(baseSize == u32(-1)) {
 			continue;
 		}
@@ -196,9 +213,11 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 				dim = compiler.evaluate_constant_u32(dim);
 			}
 
-			cap.array.push_back(dim);
+			cap.arrayVals.push_back(dim);
 			size *= dim;
 		}
+
+		cap.type->array = cap.arrayVals;
 
 		// if(!compiler.has_decoration(mtype.self, spv::DecorationArrayStride) &&
 		// 		!mtype.array.empty()) {
@@ -353,7 +372,7 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 			annotateCapture(compiled, type, name, bufOffset, captures, newDecos);
 		} else {
 			XfbCapture cap {};
-			auto baseSize = baseTypeSize(type, cap);
+			auto baseSize = fillInType(type, cap);
 			if(baseSize == u32(-1)) {
 				continue;
 			}
@@ -374,9 +393,11 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 					dim = compiled.evaluate_constant_u32(dim);
 				}
 
-				cap.array.push_back(dim);
+				cap.arrayVals.push_back(dim);
 				size *= dim;
 			}
+
+			cap.type->array = cap.arrayVals;
 
 			// if(!compiled.has_decoration(type.self, spv::DecorationArrayStride) &&
 			// 		!type.array.empty()) {
@@ -446,8 +467,8 @@ XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
 	}
 	output += ".";
 
-	auto badHash = u32(0u);
-	for(auto v : patched.spirv) badHash ^= v;
+	auto badHash = std::size_t(0u);
+	for(auto v : patched.spirv) hash_combine(hash, v);
 
 	output += std::to_string(badHash);
 	output += ".spv";
@@ -561,7 +582,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 	// memory optimization:
 	// we don't need any xfb-patched data anymore
 	mod->clearXfb();
-	mod->dev->dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
+	mod->dev->dispatch.DestroyShaderModule(mod->dev->handle, shaderModule,
+		pAllocator);
 }
 
 std::optional<spc::Resource> resource(const spc::Compiler& compiler,
@@ -731,7 +753,7 @@ spc::Compiler& specializeSpirv(ShaderModule& mod,
 	return compiled;
 }
 
-std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(const ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel) {
 	dlg_assert(mod.compiled);
@@ -739,6 +761,72 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
 	specializeSpirv(*compiled, specialization, entryPoint, spvExecutionModel,
 		mod.constantDefaults);
 	return compiled;
+}
+
+// VK_EXT_shader_object
+VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
+		VkDevice                                    device,
+		uint32_t                                    createInfoCount,
+		const VkShaderCreateInfoEXT*                pCreateInfos,
+		const VkAllocationCallbacks*                pAllocator,
+		VkShaderEXT*                                pShaders) {
+	auto& dev = getDevice(device);
+
+	ThreadMemScope memScope;
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
+	auto layoutVecs = memScope.alloc<std::vector<IntrusivePtr<DescriptorSetLayout>>>(createInfoCount);
+	for(auto [i, nci] : enumerate(ncis)) {
+		auto nLayouts = memScope.copy(nci.pSetLayouts, nci.setLayoutCount);
+		nci.pSetLayouts = nLayouts.data();
+
+		auto& cachedLayouts = layoutVecs[i];
+		for(auto& nlayout : nLayouts) {
+			auto dsLayout = getPtr(device, nlayout);
+			nlayout = dsLayout->handle;
+			cachedLayouts.push_back(std::move(dsLayout));
+		}
+	}
+
+	auto res = dev.dispatch.CreateShadersEXT(dev.handle, ncis.size(), ncis.data(),
+		pAllocator, pShaders);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pShaders[i]);
+
+		auto& mod = dev.shaderObjects.add(pShaders[i]);
+		mod.handle = pShaders[i];
+		mod.dsLayouts = std::move(layoutVecs[i]);
+		pShaders[i] = castDispatch<VkShaderEXT>(mod);
+	}
+
+	return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroyShaderEXT(
+		VkDevice                                    device,
+		VkShaderEXT                                 shader,
+		const VkAllocationCallbacks*                pAllocator) {
+	if(!shader) {
+		return;
+	}
+
+	auto shaderPtr = mustMoveUnset(device, shader);
+	shaderPtr->dev->dispatch.DestroyShaderEXT(shaderPtr->dev->handle,
+		shaderPtr->handle, pAllocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(
+		VkDevice                                    device,
+		VkShaderEXT                                 shader,
+		size_t*                                     pDataSize,
+		void*                                       pData) {
+	auto& shaderObject = get(device, shader);
+	auto& dev = *shaderObject.dev;
+	return dev.dispatch.GetShaderBinaryDataEXT(dev.handle,
+		shaderObject.handle, pDataSize, pData);
 }
 
 } // namespace vil

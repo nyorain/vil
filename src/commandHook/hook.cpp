@@ -18,7 +18,9 @@
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
+
 #include <accelStructVertices.comp.spv.h>
+#include <shaderTable.comp.spv.h>
 
 #include <copyTex.comp.1DArray.spv.h>
 #include <copyTex.comp.u1DArray.spv.h>
@@ -26,6 +28,9 @@
 #include <copyTex.comp.2DArray.spv.h>
 #include <copyTex.comp.u2DArray.spv.h>
 #include <copyTex.comp.i2DArray.spv.h>
+#include <copyTex.comp.2DMSArray.spv.h>
+#include <copyTex.comp.u2DMSArray.spv.h>
+#include <copyTex.comp.i2DMSArray.spv.h>
 #include <copyTex.comp.3D.spv.h>
 #include <copyTex.comp.u3D.spv.h>
 #include <copyTex.comp.i3D.spv.h>
@@ -36,9 +41,24 @@
 #include <copyTex.comp.2DArray.noformat.spv.h>
 #include <copyTex.comp.u2DArray.noformat.spv.h>
 #include <copyTex.comp.i2DArray.noformat.spv.h>
+#include <copyTex.comp.2DMSArray.noformat.spv.h>
+#include <copyTex.comp.u2DMSArray.noformat.spv.h>
+#include <copyTex.comp.i2DMSArray.noformat.spv.h>
 #include <copyTex.comp.3D.noformat.spv.h>
 #include <copyTex.comp.u3D.noformat.spv.h>
 #include <copyTex.comp.i3D.noformat.spv.h>
+
+#include <writeVertexCmd.comp.spv.h>
+#include <writeVertexCmd.comp.count.spv.h>
+#include <writeIndexCmd.comp.spv.h>
+#include <writeIndexCmd.comp.count.spv.h>
+#include <processIndices.comp.idx16.spv.h>
+#include <processIndices.comp.idx32.spv.h>
+#include <writeVertexCmdIndexed.comp.spv.h>
+#include <copyVertices.comp.vert8.idx16.spv.h>
+#include <copyVertices.comp.vert8.idx32.spv.h>
+#include <copyVertices.comp.vert32.idx16.spv.h>
+#include <copyVertices.comp.vert32.idx32.spv.h>
 
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
@@ -87,7 +107,9 @@ bool copyableDescriptorSame(DescriptorStateRef a, DescriptorStateRef b,
 }
 
 void invalidate(CommandHookRecord& rec) {
-	rec.hook = nullptr; // notify the record that it's no longer needed
+	rec.invalid = true;
+	rec.prev = nullptr;
+	rec.next = nullptr;
 	auto it = find(rec.record->hookRecords, &rec);
 	dlg_assert(it != rec.record->hookRecords.end());
 
@@ -102,9 +124,20 @@ CommandHook::CommandHook(Device& dev) {
 	dev_ = &dev;
 	hookAccelStructBuilds = checkEnvBinary("VIL_CAPTURE_ACCEL_STRUCTS", true);
 	initImageCopyPipes(dev);
+	initVertexCopy(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
+		initShaderTableHook(dev);
 	}
+
+	// init capture
+	auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	captureBuffer_.ensure(dev, shaderCaptureSize, usage, {},
+		"CaptureBuf", OwnBuffer::Type::deviceLocal);
+	captureAddress_ = captureBuffer_.queryAddress();
 }
 
 CommandHook::~CommandHook() {
@@ -217,29 +250,36 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	if(dev.shaderStorageImageWriteWithoutFormat) {
 		addCpi(copyTex_comp_u1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_u2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_u2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_u3D_spv_data, specOther);
 
 		addCpi(copyTex_comp_i1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_i2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_i2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_i3D_spv_data, specOther);
 
 		addCpi(copyTex_comp_1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_3D_spv_data, specOther);
 	} else {
 		addCpi(copyTex_comp_u1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_u2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_u2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_u3D_noformat_spv_data, specOther);
 
 		addCpi(copyTex_comp_i1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_i2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_i2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_i3D_noformat_spv_data, specOther);
 
 		addCpi(copyTex_comp_1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_3D_noformat_spv_data, specOther);
 	}
 
+	dlg_assert(cpis.size() == sizeof(sampleImagePipes_) / sizeof(sampleImagePipes_[0]));
 	VK_CHECK_DEV(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
 		cpis.size(), cpis.data(), nullptr, sampleImagePipes_), dev);
 
@@ -250,6 +290,13 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	for(auto mod : mods) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
+}
+
+void CommandHook::initShaderTableHook(Device& dev) {
+	hookShaderTable_.init(dev, {{{
+		shaderTable_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"hookShaderTable", false);
 }
 
 void CommandHook::initAccelStructCopy(Device& dev) {
@@ -290,6 +337,53 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	nameHandle(dev, accelStructVertCopy_, "CommandHook:accelStructVertCopy");
 
 	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
+}
+
+void CommandHook::initVertexCopy(Device& dev) {
+	writeVertexCmd_.init(dev, {{{
+		writeVertexCmd_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmd");
+	writeVertexCmdCountBuf_.init(dev, {{{
+		writeVertexCmd_comp_count_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmdCount");
+	writeIndexCmd_.init(dev, {{{
+		writeIndexCmd_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeIndexCmd");
+	writeIndexCmdCountBuf_.init(dev, {{{
+		writeIndexCmd_comp_count_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeIndexCmdCount");
+	processIndices16_.init(dev, {{{
+		processIndices_comp_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"processIndices16");
+	processIndices32_.init(dev, {{{
+		processIndices_comp_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"processIndices32");
+	writeVertexCmdIndexed_.init(dev, {{{
+		writeVertexCmdIndexed_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmdIndexed");
+	copyVerticesByte16_.init(dev, {{{
+		copyVertices_comp_vert8_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesByte16");
+	copyVerticesByte32_.init(dev, {{{
+		copyVertices_comp_vert8_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesByte32");
+	copyVerticesUint16_.init(dev, {{{
+		copyVertices_comp_vert32_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesUint16");
+	copyVerticesUint32_.init(dev, {{{
+		copyVertices_comp_vert32_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesUint32");
 }
 
 // TODO: temporary removal of record.dsState due to sync issues.
@@ -376,8 +470,71 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	// section here as well and quite expensive.
 	std::lock_guard lock(dev.mutex);
 
+	LinAllocScope localMatchMem(matchAlloc_);
+
+	bool trySkipHook = target_.type == TargetType::none;
+	const CommandRecord* frameDstRecord {};
+	span<const CommandSectionMatch> frameRecMatchData {};
+	auto swapchain = dev_->swapchainLocked();
+	if(target_.type == TargetType::inFrame) {
+		dlg_assertm(swapchain, "no swapchain anymore");
+		if(swapchain) {
+			dlg_assert(target_.submissionID < target_.frame.size());
+			if(subm.queue == target_.frame[target_.submissionID].queue) {
+				// get the current frame
+				std::vector<FrameSubmission> currFrame =
+					swapchain->nextFrameSubmissions.batches;
+
+				// add the new submissions
+				auto& curr = currFrame.emplace_back();
+				curr.queue = subm.queue;
+				curr.submissionID = subm.globalSubmitID;
+				for(auto& sub : subm.dstBatch->submissions) {
+					auto& cmdSub = std::get<CommandSubmission>(sub.data);
+					for(auto& cb : cmdSub.cbs) {
+						dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
+						auto rec = cb.cb->lastRecordPtrLocked();
+						dlg_assert(rec);
+						curr.submissions.push_back(std::move(rec));
+					}
+				}
+
+				// Match current frame against hook target frame.
+				// Since we don't have the full current frame here yet and want
+				// to avoid false negatives, we trim the target frame up unto
+				// the target submission.
+				auto trimmedTargetFrame = span<FrameSubmission>(target_.frame);
+				auto off = target_.submissionID;
+				dlg_assert(off < target_.frame.size());
+				trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
+
+				ThreadMemScope tms;
+				auto frameMatch = match(localMatchMem, tms, matchType, target_.frame, currFrame);
+
+				for(auto& submMatch : frameMatch.matches) {
+					if(submMatch.a != &target_.frame[target_.submissionID]) {
+						continue;
+					}
+
+					for(auto& recMatch : submMatch.matches) {
+						if(recMatch.a == target_.record) {
+							frameDstRecord = recMatch.b;
+							frameRecMatchData = recMatch.matches;
+							break;
+						}
+
+					}
+
+					break;
+				}
+			}
+		}
+
+		trySkipHook = !frameDstRecord;
+	}
+
 	// fast early-outs
-	if(localCaptures_.empty() && !forceHook.load()) {
+	if(trySkipHook && localCaptures_.empty() && !forceHook.load()) {
 		auto hasBuildCmd = false;
 		for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
 			auto& cmdSub = std::get<CommandSubmission>(sub.data);
@@ -385,77 +542,17 @@ void CommandHook::hook(QueueSubmitter& subm) {
 				auto& rec = *cb.cb->lastRecordLocked();
 				if(rec.buildsAccelStructs) {
 					hasBuildCmd = true;
-				}
-			}
-		}
-
-		if(!hasBuildCmd && (target_.type == TargetType::none)) {
-			return;
-		}
-	}
-
-	LinAllocScope localMatchMem(matchAlloc_);
-
-	const CommandRecord* frameDstRecord {};
-	span<const CommandSectionMatch> frameRecMatchData {};
-	auto swapchain = dev_->swapchainLocked();
-	if(target_.type == TargetType::inFrame) {
-		if(!swapchain) {
-			dlg_warn("no swapchain anymore");
-			return;
-		}
-
-		// different queue
-		dlg_assert(target_.submissionID < target_.frame.size());
-		if(subm.queue != target_.frame[target_.submissionID].queue) {
-			return;
-		}
-
-		// get the current frame
-		std::vector<FrameSubmission> currFrame =
-			swapchain->nextFrameSubmissions.batches;
-
-		// add the new submissions
-		auto& curr = currFrame.emplace_back();
-		curr.queue = subm.queue;
-		curr.submissionID = subm.globalSubmitID;
-		for(auto& sub : subm.dstBatch->submissions) {
-			auto& cmdSub = std::get<CommandSubmission>(sub.data);
-			for(auto& cb : cmdSub.cbs) {
-				dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
-				auto rec = cb.cb->lastRecordPtrLocked();
-				dlg_assert(rec);
-				curr.submissions.push_back(std::move(rec));
-			}
-		}
-
-		// Match current frame against hook target frame.
-		// Since we don't have the full current frame here yet and want
-		// to avoid false negatives, we trim the target frame up unto
-		// the target submission.
-		auto trimmedTargetFrame = span<FrameSubmission>(target_.frame);
-		auto off = target_.submissionID;
-		dlg_assert(off < target_.frame.size());
-		trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
-
-		ThreadMemScope tms;
-		auto frameMatch = match(localMatchMem, tms, matchType, target_.frame, currFrame);
-
-		for(auto& submMatch : frameMatch.matches) {
-			if(submMatch.a != &target_.frame[target_.submissionID]) {
-				continue;
-			}
-
-			for(auto& recMatch : submMatch.matches) {
-				if(recMatch.a == target_.record) {
-					frameDstRecord = recMatch.b;
-					frameRecMatchData = recMatch.matches;
 					break;
 				}
-
 			}
 
-			break;
+			if(hasBuildCmd) {
+				break;
+			}
+		}
+
+		if(!hasBuildCmd) {
+			return;
 		}
 	}
 
@@ -667,8 +764,7 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 
 	if(dstCmd.category() == CommandCategory::draw) {
 		if(flags & LocalCaptureBits::vertexInput) {
-			opsTmp.copyIndexBuffers = true;
-			opsTmp.copyVertexBuffers = true;
+			opsTmp.copyVertexInput = true;
 		}
 
 		if(flags & LocalCaptureBits::vertexOutput) {
@@ -862,7 +958,7 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 			dlg_assert(foundHookRecord->state);
 		}
 
-		dlg_assert(foundHookRecord->hook == this);
+		dlg_assert(!foundHookRecord->invalid);
 		dlg_assert(!foundHookRecord->writer);
 
 		// Not possible to reuse the hook-recorded cb when the command
@@ -936,6 +1032,11 @@ void CommandHook::clearCompleted() {
 
 void CommandHook::invalidateRecordings(bool forceAll) {
 	std::lock_guard lock(dev_->mutex);
+	invalidateRecordingsLocked(forceAll);
+}
+
+void CommandHook::invalidateRecordingsLocked(bool forceAll) {
+	assertOwned(dev_->mutex);
 
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
@@ -973,8 +1074,9 @@ void CommandHook::updateHook(Update&& update) {
 		// make sure we don't destroy these while lock is held
 		Target oldTarget;
 
-		{
+		if (update.newTarget || update.newOps) {
 			std::lock_guard lock(dev_->mutex);
+			hints_ = {};
 
 			if(update.newTarget) {
 				oldTarget = std::move(target_);
@@ -1008,6 +1110,16 @@ CommandHook::Ops CommandHook::ops() const {
 CommandHook::Target CommandHook::target() const {
 	std::lock_guard lock(dev_->mutex);
 	return target_;
+}
+
+CommandHook::Hints& CommandHook::hintsLocked() {
+	assertOwned(dev_->mutex);
+	return hints_;
+}
+
+CommandHook::Ops& CommandHook::opsLocked() {
+	assertOwned(dev_->mutex);
+	return ops_;
 }
 
 void CommandHook::addLocalCapture(std::unique_ptr<LocalCapture>&& lc) {

@@ -554,7 +554,8 @@ VKAPI_ATTR void VKAPI_CALL CmdInsertDebugUtilsLabelEXT(
     VkCommandBuffer                             commandBuffer,
     const VkDebugUtilsLabelEXT*                 pLabelInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
+// VK_KHR_push_descriptor, vulkan 1.4
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet(
     VkCommandBuffer                             commandBuffer,
     VkPipelineBindPoint                         pipelineBindPoint,
     VkPipelineLayout                            layout,
@@ -562,7 +563,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
     uint32_t                                    descriptorWriteCount,
     const VkWriteDescriptorSet*                 pDescriptorWrites);
 
-VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplate(
     VkCommandBuffer                             commandBuffer,
     VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
     VkPipelineLayout                            layout,
@@ -609,7 +610,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
     VkCommandBuffer                             commandBuffer);
 
 // VK_EXT_line_rasterization
-VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetLineStipple(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    lineStippleFactor,
     uint16_t                                    lineStipplePattern);
@@ -834,5 +835,42 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawMultiIndexedEXT(
     uint32_t                                    firstInstance,
     uint32_t                                    stride,
     const int32_t*                              pVertexOffset);
+
+// VK_EXT_shader_object
+VKAPI_ATTR void VKAPI_CALL CmdBindShadersEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    stageCount,
+    const VkShaderStageFlagBits*                pStages,
+    const VkShaderEXT*                          pShaders);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthClampRangeEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkDepthClampModeEXT                         depthClampMode,
+    const VkDepthClampRangeEXT*                 pDepthClampRange);
+
+// VK_KHR_maintenance5, Vulkan 1.4
+VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer2(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    buffer,
+    VkDeviceSize                                offset,
+    VkDeviceSize                                size,
+    VkIndexType                                 indexType);
+
+// VK_KHR_maintenance6, Vulkan 1.4
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(
+    VkCommandBuffer                             commandBuffer,
+    const VkBindDescriptorSetsInfo*             pBindDescriptorSetsInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(
+    VkCommandBuffer                             commandBuffer,
+    const VkPushConstantsInfo*                  pPushConstantsInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet2(
+    VkCommandBuffer                             commandBuffer,
+    const VkPushDescriptorSetInfo*              pPushDescriptorSetInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplate2(
+    VkCommandBuffer                             commandBuffer,
+    const VkPushDescriptorSetWithTemplateInfo*  pPushDescriptorSetWithTemplateInfo);
 
 } // namespace vil

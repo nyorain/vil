@@ -28,9 +28,8 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <imgui/imgui_internal.h>
-#include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	#include <backward/resolve.hpp>
@@ -323,8 +322,6 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
-			} else if(isLocalCapture && sel.completedHookState()) {
-				shaderDebugger_.initVarMap();
 			}
 
 			break;
@@ -489,17 +486,20 @@ void CommandViewer::displayDsList() {
 	// TODO: make runtime setting?
 	// whether to notify of unbound descriptor sets
 	static constexpr auto showUnboundSets = true;
+	static constexpr auto showIncompatibleSets = true;
+	static constexpr auto showUncapturedSets = true;
 
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	auto toplevelFlags = ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth;
 	if(ImGui::TreeNodeEx("Descriptors", toplevelFlags)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		auto size = std::min(dss.size(), cmd->boundPipe()->layout->descriptors.size());
+		auto& pipeLayout = *cmd->boundPipe()->layout;
+		auto size = std::min(dss.size(), pipeLayout.descriptors.size());
 		for(auto setID = 0u; setID < size; ++setID) {
 			auto& ds = dss[setID];
 
 			// No descriptor set bound
-			if(!ds.dsEntry) {
+			if(!ds.layout) {
 				if(showUnboundSets) {
 					auto label = dlg::format("Descriptor Set {}: unbound", setID);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
@@ -511,7 +511,7 @@ void CommandViewer::displayDsList() {
 
 					if(ImGui::IsItemHovered()) {
 						ImGui::BeginTooltip();
-						imGuiText("No descriptor was bound for this slot");
+						imGuiText("No descriptor set was bound for this slot");
 						// TODO: check whether the pipeline uses any bindings
 						// of this descriptor statically. Warn, if so.
 						// Are there any descriptor flags that would allow this?
@@ -522,16 +522,63 @@ void CommandViewer::displayDsList() {
 				continue;
 			}
 
-			// TODO: this can happen now with descriptor cows
-			auto stateIt = dsState.states.find(ds.dsEntry);
-			dlg_assert_or(stateIt != dsState.states.end(), continue);
+			if(!compatibleForSetN(pipeLayout, *ds.layout, setID)) {
+				if(showIncompatibleSets) {
+					auto label = dlg::format("Descriptor Set {}: incompatible", setID);
+					auto flags = ImGuiTreeNodeFlags_Bullet |
+						ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen |
+						ImGuiTreeNodeFlags_SpanFullWidth |
+						ImGuiTreeNodeFlags_FramePadding;
+					ImGui::TreeNodeEx(label.c_str(), flags);
 
-			auto& dsCow = *stateIt->second;
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						imGuiText("A descriptor set was bind for this slot but "
+							"with an incompatible layout");
+						ImGui::EndTooltip();
+					}
+				}
+
+				continue;
+			}
+
+			std::unique_lock<DebugMutex> dsCowLock;
+			DescriptorStateRef state;
+			auto& dsLayout = *pipeLayout.descriptors[setID];
+
+			if(ds.dsEntry) {
+				auto stateIt = dsState.states.find(ds.dsEntry);
+				if(stateIt == dsState.states.end()) {
+					// not 100% sure how this can happen
+					dlg_error("uncaptured set");
+					if (showUncapturedSets) {
+						auto label = dlg::format("Descriptor Set {}: not captured", setID);
+						auto flags = ImGuiTreeNodeFlags_Bullet |
+							ImGuiTreeNodeFlags_Leaf |
+							ImGuiTreeNodeFlags_NoTreePushOnOpen |
+							ImGuiTreeNodeFlags_SpanFullWidth |
+							ImGuiTreeNodeFlags_FramePadding;
+						ImGui::TreeNodeEx(label.c_str(), flags);
+					}
+
+					continue;
+				}
+
+				auto& dsCow = *stateIt->second;
+				std::tie(state, dsCowLock) = access(dsCow);
+
+				dlg_assert(compatible(dsLayout, *state.layout));
+			} else {
+				dlg_assert_or(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT, continue);
+				state.data = ds.pushDescriptors.data();
+				state.layout = &dsLayout;
+				state.variableDescriptorCount = 0u;
+			}
 
 			auto label = dlg::format("Descriptor Set {}", setID);
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if(ImGui::TreeNodeEx(label.c_str(), toplevelFlags)) {
-				auto [state, lock] = access(dsCow);
 				for(auto bID = 0u; bID < state.layout->bindings.size(); ++bID) {
 					auto sstages = stages(pipe);
 					dlg_assert(!sstages.empty());
@@ -912,6 +959,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		auto& elem = buffers(dsState, bindingID)[elemID];
 		dlg_assert(elem.buffer);
 
+		ImGui::SameLine();
 		refButton(gui, *elem.buffer);
 		ImGui::SameLine();
 		drawOffsetSize(elem, dynOffset);
@@ -1014,11 +1062,16 @@ void CommandViewer::displayDs(Draw& draw) {
 					return;
 				}
 
+				refButton(*gui_, *imgView.img);
+				imGuiSameLineSep();
+				refButton(*gui_, imgView);
+				imGuiSameLineSep();
+				imGuiText("Layout: {}", vk::name(elem.layout));
+
 				// TODO: hacky, done because displayImage used to
 				// acquire the device mutex in some cases
 				lock = {};
 				dsState = {};
-
 				displayImage(draw, *img);
 			}
 		}
@@ -1124,9 +1177,10 @@ void CommandViewer::displayAttachment(Draw& draw) {
 
 	dlg_assert(aid < attachments.size());
 
-	// refButtonD(*gui_, attachments[aid]);
-	if(attachments[aid]) {
-		// refButtonD(*gui_, attachments[aid]->img);
+	if(aid < attachments.size() && attachments[aid]) {
+		refButtonExpect(*gui_, attachments[aid]);
+		imGuiSameLineSep();
+		refButtonExpect(*gui_, attachments[aid]->img);
 	}
 
 	auto hookState = selection().completedHookState();
@@ -1346,7 +1400,11 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd,
+					*hookState, gui_->dt(), *this);
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1357,7 +1415,8 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = true;
 				updateHook();
 			} else {
-				vertexViewer_.displayOutput(draw, *drawCmd, *hookState, gui_->dt());
+				vertexViewer_.displayOutput(draw, *drawCmd, *hookState,
+					gui_->dt(), *this);
 			}
 
 			ImGui::EndTabItem();
@@ -1539,17 +1598,15 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
-	// TODO: WIP
-	if(command_.back()->category() == CommandCategory::dispatch) {
-		auto* dcmd = deriveCast<const DispatchCmdBase*>(command_.back());
-		if(ImGui::Button("Debug shader")) {
-			if(dcmd->state->pipe) {
-				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(std::move(mod));
-				view_ = IOView::shader;
-				doUpdateHook_ = true;
-				return;
-			}
+	if(isStateCmd(*command_.back())) {
+		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
+		// NOTE: we do not support traceRaysIndirect as of now.
+		// This would make shader table hooking significantly more complicated.
+		auto supported = dcmd->category() != CommandCategory::traceRays ||
+			dcmd->type() == CommandType::traceRays;
+		if(supported && dcmd->boundPipe() && ImGui::Button("Debug shader")) {
+			selectShaderDebugger(*dcmd->boundPipe());
+			return;
 		}
 	}
 
@@ -1608,14 +1665,14 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
+	// auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	// auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	// auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
-	auto indexedCmd = drawIndexedCmd ||
-		(drawIndirectCmd && drawIndirectCmd->indexed) ||
-		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
+	// auto indexedCmd = drawIndexedCmd ||
+	// 	(drawIndirectCmd && drawIndirectCmd->indexed) ||
+	// 	(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::Ops ops {};
 	bool setOps = true;
@@ -1675,13 +1732,15 @@ void CommandViewer::updateHook() {
 			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
+			ops.copyIndirectCmd = indirectCmd;
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				ops.copyVertexBuffers = true;
-				ops.copyIndexBuffers = indexedCmd;
-				ops.copyIndirectCmd = indirectCmd;
+				// TODO: set buffer size hints!
+				dlg_info("TODO: set buffer size hints");
+
+				ops.copyVertexInput = true;
+				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:
@@ -1729,7 +1788,7 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	//   slider beginning at a number that isn't 0 might be confusing.
 	auto range = img.subresRange();
 	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
-		img.format, range, imgLayout, imgLayout, flags);
+		img.format, range, imgLayout, imgLayout, img.samples, flags);
 	imageViewer_.display(draw);
 }
 
@@ -1753,7 +1812,7 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 			refStages[stageCount] = i;
 			++stageCount;
 
-			if(viewData_.ds.stage == stage.stage) {
+			if(viewData_.ds.stage == i) {
 				selectedValid = true;
 			}
 		}
@@ -1766,36 +1825,37 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 	}
 
 	if(!selectedValid) {
-		viewData_.ds.stage = sstages[refStages[0]].stage;
+		viewData_.ds.stage = refStages[0];
 	}
 
 	if(stageCount == 1u) {
 		return &sstages[refStages[0]];
 	}
 
-	if(ImGui::BeginCombo("Stage", vk::name(viewData_.ds.stage))) {
+	auto& stage = sstages[viewData_.ds.stage];
+	auto preview = dlg::format("{}: {}", stage.entryPoint, vk::name(stage.stage));
+	if(ImGui::BeginCombo("Stage", preview.c_str())) {
 		for(auto id : refStages) {
-			auto name = vk::name(sstages[id].stage);
-			if(ImGui::Selectable(name)) {
-				viewData_.ds.stage = sstages[id].stage;
+			auto name = dlg::format("{}: {}", sstages[id].entryPoint, vk::name(sstages[id].stage));
+			if(ImGui::Selectable(name.c_str())) {
+				viewData_.ds.stage = id;
 			}
 		}
 
 		ImGui::EndCombo();
 	}
 
-	for(auto& stage : sstages) {
-		if(stage.stage == viewData_.ds.stage) {
-			return &stage;
-		}
-	}
-
-	dlg_error("unreachable");
-	return nullptr;
+	return &sstages[viewData_.ds.stage];
 }
 
 CommandSelection& CommandViewer::selection() const {
 	return gui_->cbGui().selector();
+}
+
+void CommandViewer::selectShaderDebugger(const Pipeline& pipe, const Vec3ui& invocation) {
+	shaderDebugger_.select(pipe, invocation);
+	view_ = IOView::shader;
+	doUpdateHook_ = true;
 }
 
 } // namespace vil
