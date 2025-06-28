@@ -35,16 +35,13 @@ void main() {
 		info.maxIndex - info.minIndex > info.indexCount;
 
 	if(doResolveIndices) {
-		// needed for resolve path in copyVertices.comp
-		info.minIndex = info.copyTypeOrIndexOffset;
-
 		// In this case, we copy the vertices as addressed by index buffer
 		// We still copy the index buffer just to show its data in the UI
-		info.copyTypeOrIndexOffset = resolveIndices;
+		info.copyType = resolveIndices;
 		info.dispatchPerVertexX = ceilDivide(info.indexCount, 64u);
 	} else {
 		// in this case, we copy the vertices just as they are in the vertex buffer
-		info.copyTypeOrIndexOffset = copyVertices;
+		info.copyType = copyVertices;
 		info.dispatchPerVertexX = ceilDivide(info.maxIndex - info.minIndex, 64u);
 	}
 }

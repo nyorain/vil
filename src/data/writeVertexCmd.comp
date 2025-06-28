@@ -66,6 +66,6 @@ void main() {
 	info.dispatchPerInstanceZ = 1u;
 	info.firstInstance = drawCmdData[cmdDataOff + 3];
 
-	info.copyTypeOrIndexOffset = copyVertices;
+	info.copyType = copyVertices;
 }
 

@@ -1127,21 +1127,11 @@ void Gui::drawOverviewUI(Draw& draw) {
 		}
 
 		ImGui::Checkbox("Show ImGui Demo", &showImguiDemo_);
-
-		auto force = dev.commandHook->forceHook.load();
-		if(ImGui::Checkbox("Force hooking", &force)) {
-			dev.commandHook->forceHook.store(force);
-		}
-
-		auto allow = dev.commandHook->allowReuse.load();
-		if(ImGui::Checkbox("Allow hook record reuse", &allow)) {
-			dev.commandHook->allowReuse.store(allow);
-		}
-
-		auto hookAccel = dev.commandHook->hookAccelStructBuilds.load();
-		if(ImGui::Checkbox("Hook AccelerationStructures", &hookAccel)) {
-			dev.commandHook->hookAccelStructBuilds.store(hookAccel);
-		}
+		imGuiCheckbox("Force hooking", dev.commandHook->forceHook);
+		imGuiCheckbox("Allow hook record reuse", dev.commandHook->allowReuse);
+		imGuiCheckbox("Hook AccelerationStructures", dev.commandHook->hookAccelStructBuilds);
+		imGuiCheckbox("Print VertexCapture Timings", dev.printVertexCaptureTimings);
+		imGuiCheckbox("Print VertexCapture Metadata", dev.printVertexCaptureMetadata);
 	}
 }
 

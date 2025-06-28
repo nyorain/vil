@@ -46,13 +46,14 @@ public:
 	// Returns whether hook need update
 	bool displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt,
 		CommandViewer&);
-	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt,
+	bool displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt,
 		CommandViewer&);
 	void displayTriangles(Draw&, const OwnBuffer& buf, const AccelTriangles&, float dt);
 	void displayInstances(Draw&, const AccelInstances&, float dt,
 		std::function<AccelStructStatePtr(u64)> blasResolver);
 
 	u32 selectedCommand() const { return selectedCommand_; }
+	bool showAll() const { return showAll_; }
 
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
@@ -102,7 +103,7 @@ private:
 	// - viewport and scissor dynamic state bound
 	// Uses the current imgui context.
 	void imGuiDraw(const DrawData& data);
-	void showSettings();
+	bool showSettings(bool allowShowAll = false);
 	void displayVertexID(u32 id);
 	void displayDebugPopup(u32 vertexID, CommandViewer& viewer,
 		const DrawCmdBase& cmd);
@@ -160,6 +161,7 @@ private:
 	bool flipY_ {};
 	bool arcball_ {true}; // whether to use instead of first person cam
 	bool wireframe_ {false};
+	bool showAll_ {};
 	float arcOffset_ {1.f};
 };
 

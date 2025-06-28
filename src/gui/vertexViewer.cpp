@@ -111,7 +111,7 @@ bool perspectiveHeuristic(ReadBuf data, u32 stride) {
 	return nonOneW;
 }
 
-AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW) {
+AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW, bool flipY) {
 	// dlg_assert(data.size() % stride == 0u);
 	dlg_assert(data.size() >= stride);
 
@@ -126,6 +126,10 @@ AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW) {
 
 		if(useW) {
 			pos3.z = pos4[3];
+		}
+
+		if(flipY) {
+			pos3.y *= -1;
 		}
 
 		min = vec::cw::min(min, pos3);
@@ -144,7 +148,7 @@ AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW) {
 }
 
 AABB3f bounds(VkFormat vertFormat, ReadBuf vertData, u32 vertStride,
-		VkIndexType indexType, ReadBuf indexData) {
+		VkIndexType indexType, ReadBuf indexData, u32 minIndex) {
 	auto indSize = indexSize(indexType);
 	dlg_assert(indSize > 0);
 	dlg_assert(indexData.size() % indSize == 0u);
@@ -155,6 +159,9 @@ AABB3f bounds(VkFormat vertFormat, ReadBuf vertData, u32 vertStride,
 
 	while(indexData.size() >= indSize) {
 		auto ind = readIndex(indexType, indexData);
+		dlg_assert(ind >= minIndex);
+		ind -= minIndex;
+
 		dlg_assert_or(ind * vertStride < vertData.size(), continue);
 
 		auto vertBuf = vertData.subspan(ind * vertStride);
@@ -653,7 +660,7 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 			viewProjMtx_,
 			// TODO: we could calculate them from perspective z, w values
 			0.f,
-			data.useW ? 100000.f : 1.f,
+			data.useW ? -100000.f : -1.f,
 			data.useW,
 			colFrustum,
 		};
@@ -768,7 +775,8 @@ void VertexViewer::updateArcballCam(float dt) {
 	auto ctrl = io.KeyCtrl;
 
 	// panning
-	if(io.MouseDown[2] && shift && !ctrl) {
+	// if(io.MouseDown[2] && shift && !ctrl) {
+	if(io.MouseDown[1] && !shift && !ctrl) {
 		// y is double flipped because of y-down convention for
 		// mouse corrds vs y-up convention of rendering
 		// TODO: maybe don't do this here but let the user decide
@@ -904,9 +912,11 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		auto count = state.indirectCommandCount;
 		if(count == 0u) {
 			imGuiText("No commands (drawCount = 0)");
+			updateHook = (selectedCommand_ != u32(-1));
 			selectedCommand_ = -1;
 			return;
 		} else if(count == 1u) {
+			updateHook = (selectedCommand_ != 0u);
 			selectedCommand_ = 0u;
 		} else {
 			auto lbl = dlg::format("Commands: {}", count);
@@ -964,26 +974,31 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	auto indexData = state.indexBufCopy.data();
 	const auto metadata = read<Metadata>(indexData);
-	const auto copyType = metadata.copyTypeOrIndexOffset;
+	const auto copyType = metadata.copyType;
 	dlg_assert(params.indexType || copyType == CommandHookRecord::copyTypeVertices);
 	const auto useIndexedDraw = params.indexType &&
 		copyType != CommandHookRecord::copyTypeResolveIndices;
 
 	// TODO: handle invalid copyType/the case where nothing was copied
 
-	dlg_trace("== vertex input metadata ==");
-	dlg_trace(" dispatchPerVertexX {}", metadata.dispatchPerVertexX);
-	dlg_trace(" dispatchPerVertexY {}", metadata.dispatchPerVertexY);
-	dlg_trace(" dispatchPerVertexZ {}", metadata.dispatchPerVertexZ);
-	dlg_trace(" dispatchPerInstanceX {}", metadata.dispatchPerInstanceX);
-	dlg_trace(" dispatchPerInstanceY {}", metadata.dispatchPerInstanceY);
-	dlg_trace(" dispatchPerInstanceZ {}", metadata.dispatchPerInstanceZ);
-	dlg_trace(" firstVertex {}", metadata.firstVertex);
-	dlg_trace(" firstInstance {}", metadata.firstInstance);
-	dlg_trace(" indexCount {}", metadata.indexCount);
-	dlg_trace(" minIndex {}", metadata.minIndex);
-	dlg_trace(" maxIndex {}", metadata.maxIndex);
-	dlg_trace(" copyType {}", copyType);
+	auto& dev = gui_->dev();
+	if(dev.printVertexCaptureMetadata) {
+		dlg_trace("== vertex input metadata ==");
+		dlg_trace(" dispatchPerVertexX {}", metadata.dispatchPerVertexX);
+		dlg_trace(" dispatchPerVertexY {}", metadata.dispatchPerVertexY);
+		dlg_trace(" dispatchPerVertexZ {}", metadata.dispatchPerVertexZ);
+		dlg_trace(" dispatchPerInstanceX {}", metadata.dispatchPerInstanceX);
+		dlg_trace(" dispatchPerInstanceY {}", metadata.dispatchPerInstanceY);
+		dlg_trace(" dispatchPerInstanceZ {}", metadata.dispatchPerInstanceZ);
+		dlg_trace(" firstVertex {}", metadata.firstVertex);
+		dlg_trace(" firstInstance {}", metadata.firstInstance);
+		dlg_trace(" firstIndex {}", metadata.firstIndex);
+		dlg_trace(" indexCount {}", metadata.indexCount);
+		dlg_trace(" indexBufOffset {}", metadata.indexBufOffset);
+		dlg_trace(" minIndex {}", metadata.minIndex);
+		dlg_trace(" maxIndex {}", metadata.maxIndex);
+		dlg_trace(" copyType {}", copyType);
+	}
 
 	// clamp drawCount to captured size
 	if(useIndexedDraw) {
@@ -1093,6 +1108,7 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 							u32 index = readIndex(*params.indexType, ib);
 							displayDebugPopup(params.vertexOffset + index, cmdView, cmd);
 
+							// TODO: show vertexOffset vs read index in popup
 							imGuiText("{}", params.vertexOffset + index);
 
 							if(copyType == CommandHookRecord::copyTypeVertices) {
@@ -1155,12 +1171,16 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			auto size = indexSize(*params.indexType) * params.drawCount;
 			indData = indData.subspan(sizeof(Metadata), size);
 			vertBounds = bounds(attrib.format, vertData, binding.stride,
-				*params.indexType, indData);
+				*params.indexType, indData, metadata.minIndex);
 		} else {
 			auto size = params.drawCount * binding.stride;
 			vertData = vertData.subspan(0u, size);
-			vertBounds = bounds(attrib.format, vertData, binding.stride, false);
+			vertBounds = bounds(attrib.format, vertData, binding.stride,
+				false, false);
 		}
+
+		dlg_trace("vertBounds: pos {}, extent {}",
+			vertBounds.pos, vertBounds.extent);
 
 		centerCamOnBounds(vertBounds);
 	}
@@ -1218,7 +1238,7 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 			// for copyTypeVertices, we just copied the raw index buffer.
 			// But we only copied the portion really needed by the draw call
-			dlg_assert(metadata.copyTypeOrIndexOffset == CommandHookRecord::copyTypeVertices);
+			dlg_assert(metadata.copyType == CommandHookRecord::copyTypeVertices);
 			drawData_.params.vertexOffset = -i32(metadata.minIndex);
 
 			// debug
@@ -1306,10 +1326,10 @@ const char* name(spv11::BuiltIn builtin) {
 	}
 }
 
-void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
+bool VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt, CommandViewer& cmdView) {
 	ZoneScoped;
-	dlg_assert_or(cmd.state->pipe, return);
+	dlg_assert_or(cmd.state->pipe, return false);
 	auto& pipe = *cmd.state->pipe;
 
 	// For captures vertices, we want to flip y by default, as our
@@ -1322,16 +1342,18 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 	if(!pipe.xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");
-		return;
+		return false;
 	} else if(!state.transformFeedback.size) {
 		ImGui::Text("Error: no transform feedback. See log output");
-		return;
+		return false;
 	}
 
 	auto& xfbPatch = *pipe.xfbPatch;
 
 	u32 vertexOffset {};
 	u32 vertexCount {};
+	u32 totalCount {};
+	auto updateHook = false;
 	auto displayCmdSlider = [&](bool indexed, u32 stride, u32 offset = 0u){
 		dlg_assert(gui_->dev().commandHook->ops().copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
@@ -1340,21 +1362,30 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		if(count == 0u) {
 			imGuiText("No commands (drawCount = 0)");
 			selectedCommand_ = -1;
+			updateHook = (selectedCommand_ != u32(-1));
 			return;
 		} else if(count == 1u) {
+			updateHook = (selectedCommand_ != 0u);
 			selectedCommand_ = 0u;
 		} else {
 			auto lbl = dlg::format("Commands: {}", count);
-			optSliderRange(lbl.c_str(), selectedCommand_, count);
+			if(optSliderRange(lbl.c_str(), selectedCommand_, count)) {
+				updateHook = true;
+			}
 		}
 
 		auto& ic = state.indirectCopy;
 		auto span = ic.data().subspan(offset);
 		if(indexed) {
-			for(auto i = 0u; i < selectedCommand_; ++i) {
+			for(auto i = 0u; i < state.indirectCommandCount; ++i) {
 				auto sub = span.subspan(i * stride);
 				auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
-				vertexOffset += ecmd.indexCount * ecmd.instanceCount;
+				auto numVerts = ecmd.indexCount * ecmd.instanceCount;
+				totalCount += numVerts;
+
+				if(i < selectedCommand_) {
+					vertexOffset += numVerts;
+				}
 			}
 
 			auto sub = span.subspan(selectedCommand_ * stride);
@@ -1364,7 +1395,12 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			for(auto i = 0u; i < selectedCommand_; ++i) {
 				auto sub = span.subspan(i * stride);
 				auto ecmd = read<VkDrawIndirectCommand>(sub);
-				vertexOffset += ecmd.vertexCount * ecmd.instanceCount;
+				auto numVerts = ecmd.vertexCount * ecmd.instanceCount;
+				totalCount += numVerts;
+
+				if(i < selectedCommand_) {
+					vertexOffset += numVerts;
+				}
 			}
 
 			auto sub = span.subspan(selectedCommand_ * stride);
@@ -1380,16 +1416,16 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride);
 		if(selectedCommand_ == u32(-1)) {
-			return;
+			return false;
 		}
 	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride, 4u); // skip u32 count in the beginning
 		if(selectedCommand_ == u32(-1)) {
-			return;
+			return false;
 		}
 	} else {
 		imGuiText("Vertex viewer unimplemented for command type");
-		return;
+		return false;
 	}
 
 	vertexCount = topologyOutputCount(pipe.inputAssemblyState.topology, vertexCount);
@@ -1401,106 +1437,13 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 		if(vertexOffset >= capturedCount) {
 			imGuiText("Nothing to display; Not enough data captured");
-			return;
+			return updateHook;
 		}
 
 		vertexCount = capturedCount - vertexOffset;
 	}
 
-	// 1: table
-	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
-		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
-	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
-		if(ImGui::BeginTable("Vertices", 1 + xfbPatch.captures.size(), flags)) {
-			ZoneScopedN("Table");
-
-			auto width = 60.f * gui_->uiScale();
-            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, width);
-			for(auto& capture : xfbPatch.captures) {
-            	ImGui::TableSetupColumn(capture.name.c_str(),
-					ImGuiTableColumnFlags_WidthFixed, capture.type->vecsize * width);
-			}
-
-			// NOTE: we don't use TableHeadersRow so that we
-			//   can show tooltips on hover.
-			ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
-			ImGui::TableNextColumn();
-			imGuiText("ID");
-
-			// header
-			for(auto& capture : xfbPatch.captures) {
-				ImGui::TableNextColumn();
-
-				auto name = capture.name.c_str();
-				if(capture.builtin) {
-					name = vil::name(spv11::BuiltIn(*capture.builtin));
-				}
-
-				if(!capture.type->array.empty()) {
-					// TODO: print all array elements. Make sure to intitialize
-					// column count correctly in BeginTable!
-					auto sname = std::string(name) + "[0]";
-					imGuiText(sname.c_str());
-				} else {
-					imGuiText(name);
-				}
-			}
-
-			// data
-			auto xfbData = state.transformFeedback.data();
-			xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
-
-			// TODO: show pages
-            ImGuiListClipper clipper;
-            clipper.Begin(vertexCount);
-			while(clipper.Step()) {
-				for(auto i = u32(clipper.DisplayStart); i < u32(clipper.DisplayEnd); ++i) {
-
-					ImGui::TableNextRow();
-					auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
-
-					ImGui::TableNextColumn();
-					displayVertexID(i);
-
-					// TODO: display debug popup
-					// But how to know at this point what the source vertex was?
-					// Would require us to capture source buffers
-					(void) cmdView;
-
-					for(auto& capture : xfbPatch.captures) {
-						ImGui::TableNextColumn();
-
-						// TODO: support matrices?
-						dlg_assert(capture.type->columns == 1u);
-						auto colStride = capture.type->width / 8;
-						for(auto c = 0u; c < capture.type->vecsize; ++c) {
-							auto off = capture.offset + c * colStride;
-							auto fs = formatScalar(*capture.type, buf, off, precision_);
-
-							if(c != 0u) {
-								ImGui::SameLine();
-							}
-
-							imGuiText("{}", fs.scalar);
-						}
-
-						// displayAtomValue(*capture.type, buf, capture.offset);
-					}
-				}
-			}
-
-			ImGui::EndTable();
-		}
-	}
-
-	ImGui::EndChild();
-
-	// 2: viewer
-	// NOTE: strictly speaking the reinterepret_cast is UB but it's
-	// all just trivial types so who cares
-
-	auto bspan = state.transformFeedback.data();
-
+	// find posCapture
 	XfbCapture* posCapture = nullptr;
 	for(auto& patch : xfbPatch.captures) {
 		if(patch.builtin && *patch.builtin == u32(spv11::BuiltIn::Position)) {
@@ -1513,7 +1456,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		// This might happen e.g. for geometry/tesselation pipes.
 		// TODO: just allow to select an attribute to be used as position in gui
 		imGuiText("No BuiltIn Position");
-		return;
+		return updateHook;
 	}
 
 	dlg_assert(posCapture->type->type == Type::typeFloat);
@@ -1522,20 +1465,118 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	dlg_assert(posCapture->type->columns == 1u);
 	dlg_assert(posCapture->type->array.empty());
 
-	bspan = bspan.subspan(vertexOffset * xfbPatch.stride + posCapture->offset,
-		vertexCount * xfbPatch.stride);
+	// 1: table
+	bool useW = true;
+	if (state.transformFeedback.map) {
+		auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
+			ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
+		if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
+			if(ImGui::BeginTable("Vertices", 1 + xfbPatch.captures.size(), flags)) {
+				ZoneScopedN("Table");
 
-	// TODO: don't evaluate this every frame, just in the beginning
-	// and when the Recenter button is pressed.
-	const bool useW = perspectiveHeuristic(bspan, xfbPatch.stride);
+				auto width = 60.f * gui_->uiScale();
+				ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, width);
+				for(auto& capture : xfbPatch.captures) {
+					ImGui::TableSetupColumn(capture.name.c_str(),
+						ImGuiTableColumnFlags_WidthFixed, capture.type->vecsize * width);
+				}
 
-	if(ImGui::Button("Recenter")) {
-		auto vertBounds = bounds(VK_FORMAT_R32G32B32A32_SFLOAT, bspan, xfbPatch.stride, useW);
-		centerCamOnBounds(vertBounds);
+				// NOTE: we don't use TableHeadersRow so that we
+				//   can show tooltips on hover.
+				ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+				ImGui::TableNextColumn();
+				imGuiText("ID");
+
+				// header
+				for(auto& capture : xfbPatch.captures) {
+					ImGui::TableNextColumn();
+
+					auto name = capture.name.c_str();
+					if(capture.builtin) {
+						name = vil::name(spv11::BuiltIn(*capture.builtin));
+					}
+
+					if(!capture.type->array.empty()) {
+						// TODO: print all array elements. Make sure to intitialize
+						// column count correctly in BeginTable!
+						auto sname = std::string(name) + "[0]";
+						imGuiText(sname.c_str());
+					} else {
+						imGuiText(name);
+					}
+				}
+
+				// data
+				auto xfbData = state.transformFeedback.data();
+				xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
+
+				// TODO: show pages
+				ImGuiListClipper clipper;
+				clipper.Begin(vertexCount);
+				while(clipper.Step()) {
+					for(auto i = u32(clipper.DisplayStart); i < u32(clipper.DisplayEnd); ++i) {
+
+						ImGui::TableNextRow();
+						auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
+
+						ImGui::TableNextColumn();
+						displayVertexID(i);
+
+						// TODO: display debug popup
+						// But how to know at this point what the source vertex was?
+						// Would require us to capture source buffers
+						(void) cmdView;
+
+						for(auto& capture : xfbPatch.captures) {
+							ImGui::TableNextColumn();
+
+							// TODO: support matrices?
+							dlg_assert(capture.type->columns == 1u);
+							auto colStride = capture.type->width / 8;
+							for(auto c = 0u; c < capture.type->vecsize; ++c) {
+								auto off = capture.offset + c * colStride;
+								auto fs = formatScalar(*capture.type, buf, off, precision_);
+
+								if(c != 0u) {
+									ImGui::SameLine();
+								}
+
+								imGuiText("{}", fs.scalar);
+							}
+
+							// displayAtomValue(*capture.type, buf, capture.offset);
+						}
+					}
+				}
+
+				ImGui::EndTable();
+			}
+		}
+
+		ImGui::EndChild();
+
+		// 2: viewer
+		// NOTE: strictly speaking the reinterepret_cast is UB but it's
+		// all just trivial types so who cares
+
+		auto bspan = state.transformFeedback.data();
+
+		bspan = bspan.subspan(vertexOffset * xfbPatch.stride + posCapture->offset,
+			vertexCount * xfbPatch.stride);
+
+		// TODO: don't evaluate this every frame, just in the beginning
+		// and when the Recenter button is pressed.
+		bool useW = perspectiveHeuristic(bspan, xfbPatch.stride);
+
+		if(ImGui::Button("Recenter")) {
+			auto vertBounds = bounds(VK_FORMAT_R32G32B32A32_SFLOAT, bspan,
+				xfbPatch.stride, useW, flipY_);
+			centerCamOnBounds(vertBounds);
+		}
 	}
 
 	ImGui::SameLine();
-	showSettings();
+	updateHook |= showSettings(true);
 
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
@@ -1557,8 +1598,15 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto& xfbBuf = state.transformFeedback;
 		drawData_.cb = draw.cb;
 		drawData_.params = {};
-		drawData_.params.drawCount = vertexCount;
-		drawData_.params.offset = vertexOffset;
+		if(showAll_) {
+			drawData_.params.drawCount = totalCount;
+			drawData_.params.offset = 0u;
+			drawData_.selectedVertex = u32(-1);
+		} else {
+			drawData_.params.drawCount = vertexCount;
+			drawData_.params.offset = vertexOffset;
+			drawData_.selectedVertex = selectedVertex_;
+		}
 		drawData_.indexBuffer = {};
 		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
 		drawData_.offset = {pos.x, pos.y};
@@ -1569,7 +1617,6 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.drawFrustum = gui_->dev().nonSolidFill;
 		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
-		drawData_.selectedVertex = selectedVertex_;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1587,6 +1634,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	}
 
 	ImGui::EndChild();
+	return updateHook;
 }
 
 void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
@@ -1826,7 +1874,8 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 	ImGui::EndChild();
 }
 
-void VertexViewer::showSettings() {
+bool VertexViewer::showSettings(bool allowShowAll) {
+	auto changed = false;
 	if(ImGui::Button(ICON_FA_WRENCH)) {
 		ImGui::OpenPopup("Vertex Viewer");
 	}
@@ -1842,8 +1891,14 @@ void VertexViewer::showSettings() {
 			ImGui::Checkbox("Wireframe", &wireframe_);
 		}
 
+		if(allowShowAll) {
+			changed |= ImGui::Checkbox("Show All", &showAll_);
+		}
+
 		ImGui::EndPopup();
 	}
+
+	return changed;
 }
 
 void VertexViewer::displayVertexID(u32 i) {

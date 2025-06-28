@@ -173,45 +173,67 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 		ReadBuf span {};
 		bool indexed {};
+		u32 count {};
 		if(auto* cmd = commandCast<const DrawIndirectCountCmd*>(&bcmd)) {
 			auto& ic = record->state->indirectCopy;
-			span = ic.data().subspan(4u);
+			span = ic.data();
+			count = read<u32>(span); // skip in span
 			indexed = cmd->isIndexed();
 		} else if(auto* cmd = commandCast<const DrawIndirectCmd*>(&bcmd)) {
 			auto& ic = record->state->indirectCopy;
 			span = ic.data();
 			indexed = cmd->isIndexed();
+			count = cmd->drawCount;
 		}
 
-		auto changed = false;
 		if(!span.empty()) {
-			if(indexed) {
-				skip(span, sizeof(VkDrawIndexedIndirectCommand) * ops.vertexInputCmd);
-				auto cmd = read<VkDrawIndexedIndirectCommand>(span);
-				changed |= max(hints.indexCountHint, cmd.indexCount);
-				changed |= max(hints.instanceCountHint, cmd.instanceCount);
+			auto changed = false;
+
+			if(ops.copyXfb) {
+				// for xfb, we have to copy everything *up to* the selected command
+				u32 vertexCount = 0u;
+				u32 sumCount = (ops.vertexCmd == u32(-1)) ? count : ops.vertexCmd + 1;
+				for(auto i = 0u; i < std::min(sumCount, count); ++i) {
+					if(indexed) {
+						auto cmd = read<VkDrawIndexedIndirectCommand>(span);
+						vertexCount += cmd.indexCount * cmd.instanceCount;
+					} else {
+						auto cmd = read<VkDrawIndirectCommand>(span);
+						vertexCount += cmd.vertexCount * cmd.instanceCount;
+					}
+				}
+
+				// NOTE: for xfb hints, we just always use vertexCountHint
+				changed |= max(hints.vertexCountHint, vertexCount);
 			} else {
-				skip(span, sizeof(VkDrawIndirectCommand) * ops.vertexInputCmd);
-				auto cmd = read<VkDrawIndirectCommand>(span);
-				changed |= max(hints.vertexCountHint, cmd.vertexCount);
-				changed |= max(hints.instanceCountHint, cmd.instanceCount);
+				if(indexed) {
+					skip(span, sizeof(VkDrawIndexedIndirectCommand) * ops.vertexCmd);
+					auto cmd = read<VkDrawIndexedIndirectCommand>(span);
+					changed |= max(hints.indexCountHint, cmd.indexCount);
+					changed |= max(hints.instanceCountHint, cmd.instanceCount);
+				} else {
+					skip(span, sizeof(VkDrawIndirectCommand) * ops.vertexCmd);
+					auto cmd = read<VkDrawIndirectCommand>(span);
+					changed |= max(hints.vertexCountHint, cmd.vertexCount);
+					changed |= max(hints.instanceCountHint, cmd.instanceCount);
+				}
 			}
-		}
 
-		// make sure to hook new records with better hints
-		if(changed) {
-			dlg_info("increasing hint size; invalidating records");
+			// make sure to hook new records with better hints
+			if(changed) {
+				dlg_info("increasing hint size; invalidating records");
 
-			hook.invalidateRecordingsLocked();
-			// TODO: just invalidate instead?
-			hook.keepAliveLC_.insert(hook.keepAliveLC_.end(),
-				std::make_move_iterator(hook.completed_.begin()),
-				std::make_move_iterator(hook.completed_.end()));
-			hook.completed_.clear();
+				hook.invalidateRecordingsLocked();
+				// TODO: just invalidate instead?
+				hook.keepAliveLC_.insert(hook.keepAliveLC_.end(),
+					std::make_move_iterator(hook.completed_.begin()),
+					std::make_move_iterator(hook.completed_.end()));
+				hook.completed_.clear();
 
-			// important that we don't insert this state into the
-			// list of completed submissions
-			return;
+				// important that we don't insert this state into the
+				// list of completed submissions
+				return;
+			}
 		}
 	}
 
@@ -288,7 +310,7 @@ void CommandHookSubmission::transmitTiming() {
 	// debug timing
 #ifdef VIL_DEBUG
 	auto timingCounts = record->ownTimingNames.size();
-	if(timingCounts) {
+	if(timingCounts && dev.printVertexCaptureTimings) {
 		u64 data[CommandHookRecord::maxDebugTimings];
 		dlg_assert(timingCounts <= CommandHookRecord::maxDebugTimings);
 		res = dev.dispatch.GetQueryPoolResults(dev.handle, record->queryPool,
@@ -313,7 +335,6 @@ void CommandHookSubmission::transmitTiming() {
 		}
 	}
 #endif // VIL_DEBUG
-
 }
 
 void CommandHookSubmission::finishAccelStructBuilds() {

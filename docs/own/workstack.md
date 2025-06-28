@@ -1,5 +1,11 @@
-- [ ] fix vulkan samples vertex input issues (e.g. try gears)
 - [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
+
+- [ ] Cleanup "Show All" mess in vertex viewer
+	- [ ] additionally (orthogonally) have a checkbox that decides
+	      whether output needs to be shown in table, be copied to host
+		  Name it something like "Show Vertex Table (slow)"?
+	- [ ] optimization: When "Show All" is not active, split up draw calls
+	      Already outlined in vertexCopy.md
 
 - [ ] rename vku to vpp?
 - [ ] Textual "bound descriptor sets" inspector

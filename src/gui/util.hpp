@@ -240,4 +240,14 @@ inline void imGuiSameLineSep() {
 	ImGui::SameLine();
 }
 
+inline bool imGuiCheckbox(nytl::StringParam name, std::atomic<bool>& flag) {
+	auto val = flag.load();
+	if(ImGui::Checkbox(name.c_str(), &val)) {
+		flag.store(val);
+		return true;
+	}
+
+	return false;
+}
+
 } // namesapce vil

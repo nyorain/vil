@@ -1079,7 +1079,6 @@ void CommandHook::updateHook(Update&& update) {
 
 		if (update.newTarget || update.newOps) {
 			std::lock_guard lock(dev_->mutex);
-			hints_ = {};
 
 			if(update.newTarget) {
 				oldTarget = std::move(target_);
@@ -1102,6 +1101,12 @@ void CommandHook::updateHook(Update&& update) {
 	if(update.invalidate) {
 		clearCompleted();
 		invalidateRecordings();
+
+		{
+			dlg_trace("invalidate Hook");
+			std::lock_guard lock(dev_->mutex);
+			hints_ = {};
+		}
 	}
 }
 

@@ -13,7 +13,10 @@ layout(push_constant, row_major) uniform PCR {
 } pcr;
 
 void main() {
-	vec3 pos = pcr.useW ? inPos.xyw : inPos.xyz;
+	vec3 pos = inPos.xyz;
+	if(pcr.useW) {
+		pos.z = -inPos.w;
+	}
 	if(pcr.flipY) {
 		pos.y *= -1;
 	}
