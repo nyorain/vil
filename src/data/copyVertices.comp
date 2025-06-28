@@ -57,7 +57,7 @@ void main() {
 	}
 
 	// instance data has no indexing mechanism, always "resolved"
-	if(info.copyTypeOrIndexOffset == copyVertices || isInstanceData != 0) {
+	if(info.copyType == copyVertices || isInstanceData != 0) {
 		const uint idOffset = (isInstanceData != 0) ?
 			info.firstInstance :
 			(info.firstVertex + info.minIndex);
@@ -74,12 +74,12 @@ void main() {
 		}
 	} else { // indexed path
 		// prevent out-of-bounds reading
-		if(info.minIndex + dtID > srcIndices.length()) {
+		const uint indID = info.indexBufOffset + info.firstIndex + dtID;
+		if(indID >= srcIndices.length()) {
 			return;
 		}
 
-		// NOTE: minIndex now contains the indexOffset, see writeVertexCmdIndexed
-		const uint index = info.firstVertex + uint(srcIndices[info.minIndex + dtID]);
+		const uint index = info.firstVertex + uint(srcIndices[indID]);
 
 		const uint dstOff = dtID * vertexStride;
 		const uint srcOff = srcBufOffset + index * vertexStride;

@@ -1400,8 +1400,11 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = true;
 				updateHook();
 			} else {
-				vertexViewer_.displayOutput(draw, *drawCmd, *hookState,
+				auto uh = vertexViewer_.displayOutput(draw, *drawCmd, *hookState,
 					gui_->dt(), *this);
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1587,8 +1590,7 @@ void CommandViewer::displayCommand() {
 		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
 		// NOTE: we do not support traceRaysIndirect as of now.
 		// This would make shader table hooking significantly more complicated.
-		auto supported = dcmd->category() != CommandCategory::traceRays ||
-			dcmd->type() == CommandType::traceRays;
+		auto supported = dcmd->type() != CommandType::traceRaysIndirect;
 		if(supported && dcmd->boundPipe() && ImGui::Button("Debug shader")) {
 			selectShaderDebugger(*dcmd->boundPipe());
 			return;
@@ -1718,14 +1720,15 @@ void CommandViewer::updateHook() {
 			break;
 		} case IOView::mesh:
 			ops.copyIndirectCmd = indirectCmd;
+			ops.vertexCmd = vertexViewer_.selectedCommand();
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-			} else {
-				// TODO: set buffer size hints!
-				dlg_info("TODO: set buffer size hints");
 
+				if(vertexViewer_.showAll()) {
+					ops.vertexCmd = u32(-1);
+				}
+			} else {
 				ops.copyVertexInput = true;
-				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:

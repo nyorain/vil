@@ -132,10 +132,14 @@ public:
 		u32 dispatchPerInstanceZ;
 		u32 firstInstance;
 
+		u32 firstIndex;
 		u32 indexCount;
 		u32 minIndex;
 		u32 maxIndex;
-		u32 copyTypeOrIndexOffset;
+
+		u32 pad_[2];
+		u32 indexBufOffset; // divided by indexSize
+		u32 copyType;
 	};
 
 	static constexpr auto copyTypeVertices = 1u;

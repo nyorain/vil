@@ -1,4 +1,4 @@
-// constants for Metadata|::copyTypeOrIndexOffset
+// constants for Metadata|::copyType
 const uint copyVertices = 1u;
 const uint resolveIndices = 2u;
 
@@ -17,12 +17,14 @@ struct Metadata {
 	uint dispatchPerInstanceZ;
 	uint firstInstance;
 
+	uint firstIndex;
 	uint indexCount;
 	uint minIndex;
 	uint maxIndex;
-	// during index processing abused for firstIndex
-	// during vertex copying, one of the constants above
-	uint copyTypeOrIndexOffset;
+
+	uvec2 padding;
+	uint indexBufOffset; // divided by indexSize
+	uint copyType;
 };
 
 uint ceilDivide(uint num, uint denom) {

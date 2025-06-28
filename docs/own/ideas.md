@@ -1,6 +1,11 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+- Dev window
+	- *everything* in UI code can output custom stuff into it, just
+	  use tabs/collapsing headers
+	- Also allows to expose options to be changed on the fly
+
 - show custom pipeline stats in the resource viewer using
   https://registry.khronos.org/vulkan/specs/latest/man/html/VK_KHR_pipeline_executable_properties.html
 

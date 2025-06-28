@@ -68,9 +68,8 @@ struct CommandHookOps {
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
 	bool copyVertexInput {};
-	u32 vertexInputCmd {}; // for multi draw, specifies the command for which to copy
-
 	bool copyXfb {}; // transform feedback
+	u32  vertexCmd {}; // for multi draw, specifies the command for which to copy
 
 	IntrusivePtr<ShaderCaptureHook> shaderCapture {};
 	Vec3u32 shaderCaptureInput {}; // globalThreadID/vertexID/...

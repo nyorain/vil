@@ -14,6 +14,7 @@ layout(push_constant) uniform PCR {
 	uint drawCmdOffset;
 	uint drawID;
 	uint drawCmdStride;
+	uint indexBufOffset;
 };
 
 layout(set = 0, binding = 0) buffer InData {
@@ -46,7 +47,9 @@ void main() {
 #ifdef COUNT_BUF
 	if(drawID > drawCmdCount[drawCmdOffset]) {
 		info.indexCount = 0u;
-		info.copyTypeOrIndexOffset = 0u;
+		info.firstIndex = 0u;
+		info.indexBufOffset = 0u;
+		info.copyType = 0u;
 		info.firstVertex = 0u;
 		info.firstInstance = 0u;
 		info.minIndex = 0u;
@@ -79,11 +82,12 @@ void main() {
 	info.dispatchPerInstanceY = 1u;
 	info.dispatchPerInstanceZ = 1u;
 
-	// indexOffset
-	info.copyTypeOrIndexOffset = drawCmdData[cmdDataOff + 2];
+	info.firstIndex = drawCmdData[cmdDataOff + 2];
 	info.firstVertex = drawCmdData[cmdDataOff + 3];
 	info.firstInstance = drawCmdData[cmdDataOff + 4];
 
 	info.minIndex = info.indexCount > 0u ? 0xFFFFFFFFu : 0u;
 	info.maxIndex = 0u;
+	info.copyType = 0u;
+	info.indexBufOffset = indexBufOffset;
 }

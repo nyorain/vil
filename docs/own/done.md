@@ -1,3 +1,4 @@
+- [x] fix vulkan samples vertex input issues (e.g. try gears)
 - [x] Allow to open where left off?
   Would require some serialization of frames/commands/resources.
   Also, would have to completely rework matching to work with those loaded up

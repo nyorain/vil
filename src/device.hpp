@@ -114,6 +114,8 @@ struct Device {
 
 	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
+	std::atomic<bool> printVertexCaptureTimings {};
+	std::atomic<bool> printVertexCaptureMetadata {};
 
 	// Aside from properties, only the families used by device
 	// are initialized.

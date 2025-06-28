@@ -30,14 +30,10 @@ layout(set = 0, binding = 1) buffer OutData {
 
 void main() {
 	const uint invocOff = gl_GlobalInvocationID.x * indicesPerInvoc;
-	const uint cmdIndexOffset = info.copyTypeOrIndexOffset;
+	const uint cmdIndexOffset = info.firstIndex + info.indexBufOffset;
 	const uint srcOffset = cmdIndexOffset + invocOff;
 	const uint dstOffset = invocOff;
-
-	const uint indicesEnd = info.copyTypeOrIndexOffset + min(info.indexCount, srcIndices.length());
-	if(srcOffset >= indicesEnd) {
-		return;
-	}
+	const uint indicesEnd = min(cmdIndexOffset + info.indexCount, srcIndices.length());
 
 	uint ownMax = 0u;
 	uint ownMin = 0xFFFFFFFFu;
