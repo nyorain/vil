@@ -264,6 +264,7 @@ const QueueTypeImpl QueueTypeImpl::instance;
 const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
 const PipelineTypeImpl PipelineTypeImpl::instance;
 
+// TODO: replace with something like castCommandType?
 static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,

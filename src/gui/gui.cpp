@@ -1132,6 +1132,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiCheckbox("Hook AccelerationStructures", dev.commandHook->hookAccelStructBuilds);
 		imGuiCheckbox("Print VertexCapture Timings", dev.printVertexCaptureTimings);
 		imGuiCheckbox("Print VertexCapture Metadata", dev.printVertexCaptureMetadata);
+		ImGui::Checkbox("Show debug window", &showDebug);
 	}
 }
 
@@ -1233,6 +1234,14 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::NewFrame();
 
+	showDebugPopup();
+
+	if(showImguiDemo_) {
+		ImGui::ShowDemoWindow();
+		ImGui::ShowMetricsWindow();
+		// ImGui::ShowAboutWindow();
+	}
+
 	unsigned flags = ImGuiWindowFlags_NoCollapse;
 	if(fullscreen) {
 		ImGui::SetNextWindowPos({0, 0});
@@ -1248,12 +1257,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			ImVec4(1.f, 0.5f, 0.5f, 0.8f) :
 			ImVec4(0.2f, 0.2f, 0.2f, 0.1f);
 		ImGui::PushStyleColor(ImGuiCol_Border, col);
-	}
-
-	if(showImguiDemo_) {
-		ImGui::ShowDemoWindow();
-		ImGui::ShowMetricsWindow();
-		// ImGui::ShowAboutWindow();
 	}
 
 	// TODO: needed?
@@ -1450,6 +1453,33 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::EndFrame();
 	ImGui::Render();
+}
+
+void Gui::showDebugPopup() {
+	if(!showDebug) {
+		return;
+	}
+
+	ImGui::PushStyleColor(ImGuiCol_WindowBg, {0.0, 0.0, 0.0, 0.8});
+	ImGui::SetNextWindowSize({500, 300}, ImGuiCond_Once);
+	auto flags = ImGuiWindowFlags_NoCollapse;
+
+	if(ImGui::Begin("vil_debug", nullptr, flags)) {
+		// should be always on top
+		// especially important for vil window mode
+		ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+
+		if(ImGui::CollapsingHeader("Gui")) {
+			auto& io = ImGui::GetIO();
+			imGuiText("Capture Mouse {}", io.WantCaptureMouse);
+			imGuiText("Capture Keyboard {}", io.WantCaptureKeyboard);
+
+			imGuiText("numDraws {}", draws_.size());
+			imGuiText("draw counter {}", drawCounter_);
+		}
+	}
+	ImGui::End();
+	ImGui::PopStyleColor();
 }
 
 void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {

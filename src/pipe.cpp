@@ -203,14 +203,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.hasDepthStencil = false;
 		pipe.xfbPatch = std::move(pres[i].xfb);
 
+		constexpr auto allGraphicsStages = VK_SHADER_STAGE_ALL_GRAPHICS |
+			VK_SHADER_STAGE_TASK_BIT_EXT |
+			VK_SHADER_STAGE_MESH_BIT_EXT;
+
 		for(auto stage : pres[i].stages) {
 			pipe.stages.emplace_back(dev, stage);
-			dlg_assert((stage.stage & VK_SHADER_STAGE_ALL_GRAPHICS) != 0);
+			dlg_assert((stage.stage & allGraphicsStages) != 0);
 
 			// vulkan spec requires that if one tessellation stage is present,
 			// both must be present.
 			pipe.hasTessellation |= (stage.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-			pipe.hasMeshShader |= (stage.stage == VK_SHADER_STAGE_MESH_BIT_NV);
+			pipe.hasMeshShader |= (stage.stage == VK_SHADER_STAGE_MESH_BIT_EXT);
 		}
 
 		pipe.rasterizationState = *pci.pRasterizationState;
@@ -540,10 +544,10 @@ u32 getSpvExecutionModel(VkShaderStageFlagBits stage) {
 			return spv::ExecutionModelFragment;
 		case VK_SHADER_STAGE_COMPUTE_BIT:
 			return spv::ExecutionModelGLCompute;
-		case VK_SHADER_STAGE_TASK_BIT_NV:
-			return spv::ExecutionModelTaskNV;
-		case VK_SHADER_STAGE_MESH_BIT_NV:
-			return spv::ExecutionModelMeshNV;
+		case VK_SHADER_STAGE_TASK_BIT_EXT:
+			return spv::ExecutionModelTaskEXT;
+		case VK_SHADER_STAGE_MESH_BIT_EXT:
+			return spv::ExecutionModelMeshEXT;
 		case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
 			return spv::ExecutionModelRayGenerationKHR;
 		case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:

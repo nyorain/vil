@@ -93,6 +93,7 @@ public:
 
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
+	bool showDebug = false;
 
 public:
 	Gui(Device& dev, VkFormat colorFormat);
@@ -200,6 +201,8 @@ private:
 
 	[[nodiscard]] VkResult addLegacySync(Draw&, VkSubmitInfo&);
 	void addFullSync(Draw&, VkSubmitInfo&);
+
+	void showDebugPopup();
 
 private:
 	Device* dev_ {};

@@ -143,16 +143,14 @@ enum class CommandType : u32 {
 	setColorWriteEnable,
 	bindShaders,
 	setDepthClampRange,
+	drawMeshTasks,
+	drawMeshTasksIndirect,
+	drawMeshTasksIndirectCount,
 
 	count,
 };
 
 using CommandCategoryFlags = nytl::Flags<CommandCategory>;
-
-struct CommandVisitor;
-
-template<typename C>
-void doVisit(CommandVisitor& v, C& cmd);
 
 // The list of commands in a CommandBuffer is organized as a tree.
 // Section-like commands (e.g. cmdBeginRenderPass) have all their commands
@@ -204,8 +202,6 @@ struct Command {
 	// Complexity is linear in the number of descendants.
 	// Returns false for itself.
 	virtual bool isDescendant(const Command& cmd) const;
-
-	virtual void visit(CommandVisitor& v) const = 0;
 
 	// Forms a forward linked list with siblings
 	Command* next {};
@@ -267,8 +263,6 @@ struct ParentCommand : Command {
 		u32 numPipeBinds {};
 	};
 
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-
 	// Returns the stats over the section this ParentCommand represents.
 	// Note that the stats only contain information about the direct children.
 	virtual const SectionStats& sectionStats() const = 0;
@@ -289,7 +283,6 @@ struct SectionCommand : ParentCommand {
 	ParentCommand* firstChildParent_ {};
 
 	Command* children() const override { return children_; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	const SectionStats& sectionStats() const override { return stats_; }
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
 };
@@ -306,7 +299,6 @@ struct CmdDerive : B {
 // Empty SectionCommand.
 struct RootCommand final : CmdDerive<SectionCommand, CommandType::root> {
 	void record(const Device&, VkCommandBuffer, u32) const override {}
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::other; }
 	std::string_view nameDesc() const override { return "<RootCommand>"; }
 };
@@ -324,7 +316,6 @@ struct BarrierCmdBase : Command {
 
 	void displayInspector(Gui& gui) const override;
 	MatchVal doMatch(const BarrierCmdBase& rhs) const;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// NOTE: we need to patch barriers when recording (instead of just
 	// storing the patched versions) so we can still show the correct,
@@ -353,7 +344,6 @@ struct Barrier2CmdBase : Command {
 
 	void displayInspector(Gui& gui) const override;
 	MatchVal doMatch(const Barrier2CmdBase& rhs) const;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// NOTE: we need to patch barriers when recording (instead of just
 	// storing the patched versions) so we can still show the correct,
@@ -369,7 +359,6 @@ struct WaitEventsCmd : CmdDerive<BarrierCmdBase, CommandType::waitEvents> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct WaitEvents2Cmd : CmdDerive<Barrier2CmdBase, CommandType::waitEvents2> {
@@ -379,7 +368,6 @@ struct WaitEvents2Cmd : CmdDerive<Barrier2CmdBase, CommandType::waitEvents2> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BarrierCmd : CmdDerive<BarrierCmdBase, CommandType::barrier> {
@@ -389,7 +377,6 @@ struct BarrierCmd : CmdDerive<BarrierCmdBase, CommandType::barrier> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct Barrier2Cmd : CmdDerive<Barrier2CmdBase, CommandType::barrier2> {
@@ -397,7 +384,6 @@ struct Barrier2Cmd : CmdDerive<Barrier2CmdBase, CommandType::barrier2> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // All direct children must be of type 'NextSubpassCmd'
@@ -422,7 +408,6 @@ struct BeginRenderPassCmd final : CmdDerive<SectionCommand, CommandType::beginRe
 	std::string_view nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::beginRenderPass; }
 };
 
@@ -445,7 +430,6 @@ struct NextSubpassCmd final : CmdDerive<SubpassCmd, CommandType::nextSubpass> {
 	// Must be tracked while recording
 	std::string_view nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Meta command needed for correct hierachy. We want each subpass to
@@ -454,7 +438,6 @@ struct FirstSubpassCmd final : CmdDerive<SubpassCmd, CommandType::firstSubpass> 
 	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "Subpass 0"; }
 	void record(const Device&, VkCommandBuffer, u32) const override {}
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct EndRenderPassCmd final : CmdDerive<Command, CommandType::endRenderPass> {
@@ -463,7 +446,6 @@ struct EndRenderPassCmd final : CmdDerive<Command, CommandType::endRenderPass> {
 	std::string_view nameDesc() const override { return "EndRenderPass"; }
 	Category category() const override { return Category::end; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Base command from which all draw, dispatch and traceRays command are derived.
@@ -471,7 +453,6 @@ struct StateCmdBase : Command {
 	virtual const DescriptorState& boundDescriptors() const = 0;
 	virtual Pipeline* boundPipe() const = 0;
 	virtual const PushConstantData& boundPushConstants() const = 0;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 inline bool isStateCmd(const Command& cmd) {
@@ -497,7 +478,6 @@ struct DrawCmdBase : StateCmdBase {
 	virtual bool isIndexed() const = 0;
 
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct DrawCmd final : CmdDerive<DrawCmdBase, CommandType::draw> {
@@ -512,7 +492,6 @@ struct DrawCmd final : CmdDerive<DrawCmdBase, CommandType::draw> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return false; }
 };
 
@@ -531,7 +510,6 @@ struct DrawIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirect>
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return indexed; }
 };
 
@@ -548,7 +526,6 @@ struct DrawIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndexed> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return true; }
 };
 
@@ -569,7 +546,6 @@ struct DrawIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndi
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return indexed; }
 };
 
@@ -587,7 +563,6 @@ struct DrawMultiCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti> {
 	std::string_view nameDesc() const override { return "DrawMulti"; };
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return false; }
 };
 
@@ -604,8 +579,44 @@ struct DrawMultiIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti
 	std::string_view nameDesc() const override { return "DrawMultiIndexed"; };
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	bool isIndexed() const override { return true; }
+};
+
+struct DrawMeshTasksCmd final : CmdDerive<DrawCmdBase, CommandType::drawMeshTasks> {
+	u32 groupCountX {};
+	u32 groupCountY {};
+	u32 groupCountZ {};
+
+	using CmdDerive::CmdDerive;
+	std::string_view nameDesc() const override { return "DrawMeshTasks"; };
+	void record(const Device&, VkCommandBuffer, u32) const override;
+	bool isIndexed() const override { return false; }
+};
+
+struct DrawMeshTasksIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawMeshTasksIndirect> {
+	Buffer* buffer {};
+	VkDeviceSize offset {};
+	u32 drawCount {};
+	u32 stride {};
+
+	using CmdDerive::CmdDerive;
+	std::string_view nameDesc() const override { return "DrawMeshTasksIndirect"; };
+	void record(const Device&, VkCommandBuffer, u32) const override;
+	bool isIndexed() const override { return false; }
+};
+
+struct DrawMeshTasksIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawMeshTasksIndirectCount> {
+	Buffer* buffer {};
+	VkDeviceSize offset {};
+	Buffer* countBuffer {};
+	VkDeviceSize countOffset {};
+	u32 maxDrawCount {};
+	u32 stride {};
+
+	using CmdDerive::CmdDerive;
+	std::string_view nameDesc() const override { return "DrawMeshTasksIndirectCount"; };
+	void record(const Device&, VkCommandBuffer, u32) const override;
+	bool isIndexed() const override { return false; }
 };
 
 struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBuffers> {
@@ -618,7 +629,6 @@ struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBu
 	std::string_view nameDesc() const override { return "BindVertexBuffers"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffer> {
@@ -632,7 +642,6 @@ struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffe
 	}
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescriptorSet> {
@@ -651,7 +660,6 @@ struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescript
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void displayInspector(Gui& gui) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct DispatchCmdBase : StateCmdBase {
@@ -668,7 +676,6 @@ struct DispatchCmdBase : StateCmdBase {
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct DispatchCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatch> {
@@ -682,7 +689,6 @@ struct DispatchCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatch> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "Dispatch"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct DispatchIndirectCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchIndirect> {
@@ -695,7 +701,6 @@ struct DispatchIndirectCmd final : CmdDerive<DispatchCmdBase, CommandType::dispa
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct DispatchBaseCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchBase> {
@@ -712,7 +717,6 @@ struct DispatchBaseCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchB
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // transfer commands
@@ -729,7 +733,6 @@ struct CopyImageCmd final : CmdDerive<Command, CommandType::copyImage> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyBufferToImageCmd final : CmdDerive<Command, CommandType::copyBufferToImage> {
@@ -744,7 +747,6 @@ struct CopyBufferToImageCmd final : CmdDerive<Command, CommandType::copyBufferTo
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyImageToBufferCmd final : CmdDerive<Command, CommandType::copyImageToBuffer> {
@@ -759,7 +761,6 @@ struct CopyImageToBufferCmd final : CmdDerive<Command, CommandType::copyImageToB
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BlitImageCmd final : CmdDerive<Command, CommandType::blitImage> {
@@ -776,7 +777,6 @@ struct BlitImageCmd final : CmdDerive<Command, CommandType::blitImage> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
@@ -792,7 +792,6 @@ struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
 	std::string_view nameDesc() const override { return "ResolveImage"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyBufferCmd final : CmdDerive<Command, CommandType::copyBuffer> {
@@ -806,7 +805,6 @@ struct CopyBufferCmd final : CmdDerive<Command, CommandType::copyBuffer> {
 	std::string_view nameDesc() const override { return "CopyBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct UpdateBufferCmd final : CmdDerive<Command, CommandType::updateBuffer> {
@@ -819,7 +817,6 @@ struct UpdateBufferCmd final : CmdDerive<Command, CommandType::updateBuffer> {
 	std::string_view nameDesc() const override { return "UpdateBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct FillBufferCmd final : CmdDerive<Command, CommandType::fillBuffer> {
@@ -833,7 +830,6 @@ struct FillBufferCmd final : CmdDerive<Command, CommandType::fillBuffer> {
 	std::string_view nameDesc() const override { return "FillBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ClearColorImageCmd final : CmdDerive<Command, CommandType::clearColorImage> {
@@ -847,7 +843,6 @@ struct ClearColorImageCmd final : CmdDerive<Command, CommandType::clearColorImag
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ClearDepthStencilImageCmd final : CmdDerive<Command, CommandType::clearDepthStencilImage> {
@@ -861,7 +856,6 @@ struct ClearDepthStencilImageCmd final : CmdDerive<Command, CommandType::clearDe
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ClearAttachmentCmd final : CmdDerive<Command, CommandType::clearAttachment> {
@@ -873,7 +867,6 @@ struct ClearAttachmentCmd final : CmdDerive<Command, CommandType::clearAttachmen
 	// NOTE: strictly speaking this isn't a transfer, we don't care.
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetEventCmd final : CmdDerive<Command, CommandType::setEvent> {
@@ -885,7 +878,6 @@ struct SetEventCmd final : CmdDerive<Command, CommandType::setEvent> {
 	std::string_view nameDesc() const override { return "SetEvent"; }
 	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetEvent2Cmd final : CmdDerive<Barrier2CmdBase, CommandType::setEvent2> {
@@ -896,7 +888,6 @@ struct SetEvent2Cmd final : CmdDerive<Barrier2CmdBase, CommandType::setEvent2> {
 	std::string_view nameDesc() const override { return "SetEvent"; }
 	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ResetEventCmd final : CmdDerive<Command, CommandType::resetEvent> {
@@ -911,7 +902,6 @@ struct ResetEventCmd final : CmdDerive<Command, CommandType::resetEvent> {
 	}
 	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Meta-command, inserted for each command buffer passed to CmdExecuteCommands.
@@ -924,7 +914,6 @@ struct ExecuteCommandsChildCmd final : CmdDerive<ParentCommand, CommandType::exe
 	std::string_view nameDesc() const override { return "ExecuteCommandsChild"; }
 	std::string toString() const override;
 	void record(const Device&, VkCommandBuffer, u32) const override {}
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// Will return the commands from the embedded record.
 	// This means that traversal of the command hierarchy can happen without
@@ -943,7 +932,6 @@ struct ExecuteCommandsCmd final : CmdDerive<ParentCommand, CommandType::executeC
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "ExecuteCommands"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	ParentCommand* firstChildParent() const override { return children_; }
 	const SectionStats& sectionStats() const override {
 		// needed only for numChildSections, empty otherwise.
@@ -961,14 +949,12 @@ struct BeginDebugUtilsLabelCmd final : CmdDerive<SectionCommand, CommandType::be
 	// NOTE: yes, we return more than just the command here.
 	// But that's because the command itself isn't of any use without the label.
 	std::string_view nameDesc() const override { return name; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct EndDebugUtilsLabelCmd final : CmdDerive<Command, CommandType::endDebugUtilsLabel> {
 	std::string_view nameDesc() const override { return "EndLabel"; }
 	Category category() const override { return Category::end; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct InsertDebugUtilsLabelCmd final : CmdDerive<Command, CommandType::insertDebugUtilsLabel> {
@@ -976,7 +962,6 @@ struct InsertDebugUtilsLabelCmd final : CmdDerive<Command, CommandType::insertDe
 	std::array<float, 4> color; // NOTE: could use this in UI
 
 	std::string_view nameDesc() const override { return name; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 };
 
@@ -989,7 +974,6 @@ struct BindPipelineCmd final : CmdDerive<Command, CommandType::bindPipeline> {
 	std::string_view nameDesc() const override { return "BindPipeline"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct PushConstantsCmd final : CmdDerive<Command, CommandType::pushConstants> {
@@ -1001,7 +985,6 @@ struct PushConstantsCmd final : CmdDerive<Command, CommandType::pushConstants> {
 	std::string_view nameDesc() const override { return "PushConstants"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // dynamic state
@@ -1013,7 +996,6 @@ struct SetViewportCmd final : CmdDerive<Command, CommandType::setViewport> {
 	std::string_view nameDesc() const override { return "SetViewport"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetScissorCmd final : CmdDerive<Command, CommandType::setScissor> {
@@ -1024,7 +1006,6 @@ struct SetScissorCmd final : CmdDerive<Command, CommandType::setScissor> {
 	std::string_view nameDesc() const override { return "SetScissor"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetLineWidthCmd final : CmdDerive<Command, CommandType::setLineWidth> {
@@ -1034,7 +1015,6 @@ struct SetLineWidthCmd final : CmdDerive<Command, CommandType::setLineWidth> {
 	std::string_view nameDesc() const override { return "SetLineWidth"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthBiasCmd final : CmdDerive<Command, CommandType::setDepthBias> {
@@ -1043,7 +1023,6 @@ struct SetDepthBiasCmd final : CmdDerive<Command, CommandType::setDepthBias> {
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBias"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthBoundsCmd final : CmdDerive<Command, CommandType::setDepthBounds> {
@@ -1053,7 +1032,6 @@ struct SetDepthBoundsCmd final : CmdDerive<Command, CommandType::setDepthBounds>
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBounds"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetBlendConstantsCmd final : CmdDerive<Command, CommandType::setBlendConstants> {
@@ -1062,7 +1040,6 @@ struct SetBlendConstantsCmd final : CmdDerive<Command, CommandType::setBlendCons
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetBlendConstants"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetStencilCompareMaskCmd final : CmdDerive<Command, CommandType::setStencilCompareMask> {
@@ -1072,7 +1049,6 @@ struct SetStencilCompareMaskCmd final : CmdDerive<Command, CommandType::setStenc
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilCompareMask"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetStencilWriteMaskCmd final : CmdDerive<Command, CommandType::setStencilWriteMask> {
@@ -1082,7 +1058,6 @@ struct SetStencilWriteMaskCmd final : CmdDerive<Command, CommandType::setStencil
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilWriteMask"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetStencilReferenceCmd final : CmdDerive<Command, CommandType::setStencilReference> {
@@ -1092,7 +1067,6 @@ struct SetStencilReferenceCmd final : CmdDerive<Command, CommandType::setStencil
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilReference"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // query pool
@@ -1104,7 +1078,6 @@ struct BeginQueryCmd final : CmdDerive<Command, CommandType::beginQuery> {
 	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "BeginQuery"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct EndQueryCmd final : CmdDerive<Command, CommandType::endQuery> {
@@ -1114,7 +1087,6 @@ struct EndQueryCmd final : CmdDerive<Command, CommandType::endQuery> {
 	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "EndQuery"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct ResetQueryPoolCmd final : CmdDerive<Command, CommandType::resetQueryPool> {
@@ -1125,7 +1097,6 @@ struct ResetQueryPoolCmd final : CmdDerive<Command, CommandType::resetQueryPool>
 	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "ResetQueryPool"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct WriteTimestampCmd final : CmdDerive<Command, CommandType::writeTimestamp> {
@@ -1139,7 +1110,6 @@ struct WriteTimestampCmd final : CmdDerive<Command, CommandType::writeTimestamp>
 		return legacy ? "WriteTimestamp" : "WriteTimestamp2";
 	}
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyQueryPoolResultsCmd final : CmdDerive<Command, CommandType::copyQueryPoolResults> {
@@ -1154,7 +1124,6 @@ struct CopyQueryPoolResultsCmd final : CmdDerive<Command, CommandType::copyQuery
 	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Push descriptor commands
@@ -1174,7 +1143,6 @@ struct PushDescriptorSetCmd final : CmdDerive<Command, CommandType::pushDescript
 		return stages ? "PushDescriptorSet2" : "PushDescriptorSet";
 	}
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	void displayInspector(Gui& gui) const override;
 };
 
@@ -1187,7 +1155,6 @@ struct PushDescriptorSetWithTemplateCmd final : CmdDerive<Command, CommandType::
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "PushDescriptorSetWithTemplate"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_fragment_shading_rate
@@ -1198,7 +1165,6 @@ struct SetFragmentShadingRateCmd final : CmdDerive<Command, CommandType::setFrag
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetFragmentShadingRateCmd"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_conditional_rendering
@@ -1210,14 +1176,12 @@ struct BeginConditionalRenderingCmd final : CmdDerive<SectionCommand, CommandTyp
 	Category category() const override { return Category::other; }
 	std::string_view nameDesc() const override { return "BeginConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct EndConditionalRenderingCmd final : CmdDerive<Command, CommandType::endConditionalRendering> {
 	Category category() const override { return Category::end; }
 	std::string_view nameDesc() const override { return "EndConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_line_rasterization
@@ -1228,7 +1192,6 @@ struct SetLineStippleCmd final : CmdDerive<Command, CommandType::setLineStipple>
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetLineStipple"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_extended_dynamic_state
@@ -1238,7 +1201,6 @@ struct SetCullModeCmd final : CmdDerive<Command, CommandType::setCullMode> {
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetCullMode"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetFrontFaceCmd final : CmdDerive<Command, CommandType::setFrontFace> {
@@ -1247,7 +1209,6 @@ struct SetFrontFaceCmd final : CmdDerive<Command, CommandType::setFrontFace> {
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetFrontFace"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetPrimitiveTopologyCmd final : CmdDerive<Command, CommandType::setPrimitiveTopology> {
@@ -1256,7 +1217,6 @@ struct SetPrimitiveTopologyCmd final : CmdDerive<Command, CommandType::setPrimit
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPrimitiveTopology"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetViewportWithCountCmd final : CmdDerive<Command, CommandType::setViewportWithCount> {
@@ -1265,7 +1225,6 @@ struct SetViewportWithCountCmd final : CmdDerive<Command, CommandType::setViewpo
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetViewportWithCount"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetScissorWithCountCmd final : CmdDerive<Command, CommandType::setScissorWithCount> {
@@ -1274,7 +1233,6 @@ struct SetScissorWithCountCmd final : CmdDerive<Command, CommandType::setScissor
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetScissorWithCount"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // BindVertexBuffers2Cmd should be mapped via BindVertexBuffers
@@ -1285,7 +1243,6 @@ struct SetDepthTestEnableCmd final : CmdDerive<Command, CommandType::setDepthTes
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthWriteEnableCmd final : CmdDerive<Command, CommandType::setDepthWriteEnable> {
@@ -1294,7 +1251,6 @@ struct SetDepthWriteEnableCmd final : CmdDerive<Command, CommandType::setDepthWr
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthWriteEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthCompareOpCmd final : CmdDerive<Command, CommandType::setDepthCompareOp> {
@@ -1303,7 +1259,6 @@ struct SetDepthCompareOpCmd final : CmdDerive<Command, CommandType::setDepthComp
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthCompareOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthBoundsTestEnableCmd final : CmdDerive<Command, CommandType::setDepthBoundsTestEnable> {
@@ -1312,7 +1267,6 @@ struct SetDepthBoundsTestEnableCmd final : CmdDerive<Command, CommandType::setDe
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBoundsTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetStencilTestEnableCmd final : CmdDerive<Command, CommandType::setStencilTestEnable> {
@@ -1321,7 +1275,6 @@ struct SetStencilTestEnableCmd final : CmdDerive<Command, CommandType::setStenci
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetStencilOpCmd final : CmdDerive<Command, CommandType::setStencilOp> {
@@ -1334,7 +1287,6 @@ struct SetStencilOpCmd final : CmdDerive<Command, CommandType::setStencilOp> {
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_extended_dynamic_state2
@@ -1344,7 +1296,6 @@ struct SetPatchControlPointsCmd final : CmdDerive<Command, CommandType::setPatch
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPatchControlPoints"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetRasterizerDiscardEnableCmd final : CmdDerive<Command, CommandType::setRasterizerDiscardEnable> {
@@ -1353,7 +1304,6 @@ struct SetRasterizerDiscardEnableCmd final : CmdDerive<Command, CommandType::set
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetRasterizerDiscardEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetDepthBiasEnableCmd final : CmdDerive<Command, CommandType::setDepthBias> {
@@ -1362,7 +1312,6 @@ struct SetDepthBiasEnableCmd final : CmdDerive<Command, CommandType::setDepthBia
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBiasEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetLogicOpCmd final : CmdDerive<Command, CommandType::setLogicOp> {
@@ -1371,7 +1320,6 @@ struct SetLogicOpCmd final : CmdDerive<Command, CommandType::setLogicOp> {
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetLogicOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetPrimitiveRestartEnableCmd final : CmdDerive<Command, CommandType::setPrimitiveRestartEnable> {
@@ -1380,7 +1328,6 @@ struct SetPrimitiveRestartEnableCmd final : CmdDerive<Command, CommandType::setP
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPrimitiveRestartEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_sample_locations
@@ -1390,7 +1337,6 @@ struct SetSampleLocationsCmd final : CmdDerive<Command, CommandType::setSampleLo
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetSampleLocations"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_discard_rectangles
@@ -1401,7 +1347,6 @@ struct SetDiscardRectangleCmd final : CmdDerive<Command, CommandType::setDisacrd
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDiscardRectangle"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_acceleration_structure
@@ -1414,7 +1359,6 @@ struct CopyAccelStructCmd final : CmdDerive<Command, CommandType::copyAccelStruc
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyAccelStructToMemoryCmd final : CmdDerive<Command, CommandType::copyAccelStructToMemory> {
@@ -1426,7 +1370,6 @@ struct CopyAccelStructToMemoryCmd final : CmdDerive<Command, CommandType::copyAc
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructureToMemory"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct CopyMemoryToAccelStructCmd final : CmdDerive<Command, CommandType::copyMemoryToAccelStruct> {
@@ -1438,7 +1381,6 @@ struct CopyMemoryToAccelStructCmd final : CmdDerive<Command, CommandType::copyMe
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyMemoryToAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct WriteAccelStructsPropertiesCmd final : CmdDerive<Command, CommandType::writeAccelStructsProperties> {
@@ -1450,7 +1392,6 @@ struct WriteAccelStructsPropertiesCmd final : CmdDerive<Command, CommandType::wr
 	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "WriteAccelerationStructuresProperties"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BuildAccelStructsCmd final : CmdDerive<Command, CommandType::buildAccelStructs> {
@@ -1462,7 +1403,6 @@ struct BuildAccelStructsCmd final : CmdDerive<Command, CommandType::buildAccelSt
 	Category category() const override { return Category::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructures"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct BuildAccelStructsIndirectCmd final : CmdDerive<Command, CommandType::buildAccelStructsIndirect> {
@@ -1478,7 +1418,6 @@ struct BuildAccelStructsIndirectCmd final : CmdDerive<Command, CommandType::buil
 	Category category() const override { return Category::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructuresIndirect"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_ray_tracing_pipeline
@@ -1495,7 +1434,6 @@ struct TraceRaysCmdBase : StateCmdBase {
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct TraceRaysCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRays> {
@@ -1512,7 +1450,6 @@ struct TraceRaysCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRays> 
 	std::string_view nameDesc() const override { return "TraceRays"; }
 	std::string toString() const override;
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct TraceRaysIndirectCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRaysIndirect> {
@@ -1525,7 +1462,6 @@ struct TraceRaysIndirectCmd final : CmdDerive<TraceRaysCmdBase, CommandType::tra
 	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct SetRayTracingPipelineStackSizeCmd final : CmdDerive<Command, CommandType::setRayTracingPipelineStackSize> {
@@ -1534,7 +1470,6 @@ struct SetRayTracingPipelineStackSizeCmd final : CmdDerive<Command, CommandType:
 	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetRayTracingPipelineStackSize"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_dynamic_rendering
@@ -1567,7 +1502,6 @@ struct BeginRenderingCmd final : CmdDerive<RenderSectionCommand, CommandType::be
 
 	std::string_view nameDesc() const override { return "BeginRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// TODO: inspector
 	// TODO: toString?
@@ -1576,7 +1510,6 @@ struct BeginRenderingCmd final : CmdDerive<RenderSectionCommand, CommandType::be
 struct EndRenderingCmd final : CmdDerive<SectionCommand, CommandType::endRendering> {
 	std::string_view nameDesc() const override { return "EndRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_vertex_input_dynamic_state
@@ -1586,7 +1519,6 @@ struct SetVertexInputCmd final : CmdDerive<Command, CommandType::setVertexInput>
 
 	std::string_view nameDesc() const override { return "SetVertexInput"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::bind; }
 };
 
@@ -1596,7 +1528,6 @@ struct SetColorWriteEnableCmd final : CmdDerive<Command, CommandType::setColorWr
 
 	std::string_view nameDesc() const override { return "SetColorWriteEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::bind; }
 };
 
@@ -1607,7 +1538,6 @@ struct BindShadersCmd final : CmdDerive<Command, CommandType::bindShaders> {
 
 	std::string_view nameDesc() const override { return "BindShadersCmd"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::bind; }
 };
 
@@ -1617,281 +1547,131 @@ struct SetDepthClampRangeCmd final : CmdDerive<Command, CommandType::setDepthCla
 
 	std::string_view nameDesc() const override { return "SetDepthClampRange"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::bind; }
 };
 
-// Visitor
-// Might seem overkill to have this here but it's useful in multiple
-// scenarios: in many cases we have extensive external functionality operating
-// on commands that shouldn't be part of the commands themselves from a design
-// POV. E.g. advanced gui functionality or serialization; implementing them
-// freely makes for a cleaner, more modular design.
-struct CommandVisitor {
-	virtual ~CommandVisitor() = default;
+// F: overloaded function type of signature void(<Command Types>*)
+// Will call f with cmd casted to the type indicated by cmdType.
+// Can be used to implement the visitor pattern, as the overloaded function
+// could also just accept base classes.
+template<typename F>
+auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
+	using CT = CommandType;
 
-	virtual void visit(const Command&) = 0;
-	virtual void visit(const ParentCommand& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SectionCommand& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
-	virtual void visit(const RenderSectionCommand& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const RootCommand& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-
-	virtual void visit(const BeginRenderPassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const EndRenderPassCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SubpassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const FirstSubpassCmd& cmd) { visit(static_cast<const SubpassCmd&>(cmd)); }
-	virtual void visit(const NextSubpassCmd& cmd) { visit(static_cast<const SubpassCmd&>(cmd)); }
-
-	virtual void visit(const BeginRenderingCmd& cmd) { visit(static_cast<const RenderSectionCommand&>(cmd)); }
-	virtual void visit(const EndRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const BeginDebugUtilsLabelCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const EndDebugUtilsLabelCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const InsertDebugUtilsLabelCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const StateCmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const DrawCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const DrawCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-	virtual void visit(const DrawIndexedCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-	virtual void visit(const DrawIndirectCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-	virtual void visit(const DrawIndirectCountCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-	virtual void visit(const DrawMultiCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-	virtual void visit(const DrawMultiIndexedCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
-
-	virtual void visit(const DispatchCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const DispatchCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
-	virtual void visit(const DispatchIndirectCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
-	virtual void visit(const DispatchBaseCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
-
-	virtual void visit(const CopyImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyBufferToImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyImageToBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BlitImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ResolveImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const UpdateBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const FillBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ClearColorImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ClearDepthStencilImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ClearAttachmentCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const SetEventCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetEvent2Cmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ResetEventCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const ExecuteCommandsChildCmd& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
-	virtual void visit(const ExecuteCommandsCmd& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
-
-	virtual void visit(const TraceRaysCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const TraceRaysCmd& cmd) { visit(static_cast<const TraceRaysCmdBase&>(cmd)); }
-	virtual void visit(const TraceRaysIndirectCmd& cmd) { visit(static_cast<const TraceRaysCmdBase&>(cmd)); }
-
-	virtual void visit(const BeginConditionalRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const EndConditionalRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const BarrierCmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const Barrier2CmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const WaitEventsCmd& cmd) { visit(static_cast<const BarrierCmdBase&>(cmd)); }
-	virtual void visit(const BarrierCmd& cmd) { visit(static_cast<const BarrierCmdBase&>(cmd)); }
-	virtual void visit(const WaitEvents2Cmd& cmd) { visit(static_cast<const Barrier2CmdBase&>(cmd)); }
-	virtual void visit(const Barrier2Cmd& cmd) { visit(static_cast<const Barrier2CmdBase&>(cmd)); }
-
-	virtual void visit(const BindVertexBuffersCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BindIndexBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BindPipelineCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BindDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetScissorCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetViewportCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetLineWidthCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthBiasCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthBoundsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetBlendConstantsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetStencilCompareMaskCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetStencilWriteMaskCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetStencilReferenceCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const BeginQueryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const EndQueryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const ResetQueryPoolCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const WriteTimestampCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyQueryPoolResultsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const PushConstantsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const PushDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const PushDescriptorSetWithTemplateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetFragmentShadingRateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const SetLineStippleCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetCullModeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetFrontFaceCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetPrimitiveTopologyCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetScissorWithCountCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetViewportWithCountCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthWriteEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthCompareOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthBoundsTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetStencilTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetStencilOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetPatchControlPointsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetRasterizerDiscardEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthBiasEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetLogicOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetPrimitiveRestartEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetSampleLocationsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDiscardRectangleCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetVertexInputCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetColorWriteEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetDepthClampRangeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const BindShadersCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-
-	virtual void visit(const CopyAccelStructCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyAccelStructToMemoryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const CopyMemoryToAccelStructCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const WriteAccelStructsPropertiesCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BuildAccelStructsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BuildAccelStructsIndirectCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const SetRayTracingPipelineStackSizeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-};
+	switch(cmdType) {
+	case CT::root: return f(static_cast<RootCommand*>(cmd));
+	case CT::waitEvents: return f(static_cast<WaitEventsCmd*>(cmd));
+	case CT::waitEvents2: return f(static_cast<WaitEvents2Cmd*>(cmd));
+	case CT::barrier: return f(static_cast<BarrierCmd*>(cmd));
+	case CT::barrier2: return f(static_cast<Barrier2Cmd*>(cmd));
+	case CT::beginRenderPass: return f(static_cast<BeginRenderPassCmd*>(cmd));
+	case CT::nextSubpass: return f(static_cast<NextSubpassCmd*>(cmd));
+	case CT::firstSubpass: return f(static_cast<FirstSubpassCmd*>(cmd));
+	case CT::endRenderPass: return f(static_cast<EndRenderPassCmd*>(cmd));
+	case CT::draw: return f(static_cast<DrawCmd*>(cmd));
+	case CT::drawIndirect: return f(static_cast<DrawIndirectCmd*>(cmd));
+	case CT::drawIndexed: return f(static_cast<DrawIndexedCmd*>(cmd));
+	case CT::drawIndirectCount: return f(static_cast<DrawIndirectCountCmd*>(cmd));
+	case CT::drawMulti: return f(static_cast<DrawMultiCmd*>(cmd));
+	case CT::drawMultiIndexed: return f(static_cast<DrawMultiIndexedCmd*>(cmd));
+	case CT::bindVertexBuffers: return f(static_cast<BindVertexBuffersCmd*>(cmd));
+	case CT::bindIndexBuffer: return f(static_cast<BindIndexBufferCmd*>(cmd));
+	case CT::bindDescriptorSet: return f(static_cast<BindDescriptorSetCmd*>(cmd));
+	case CT::dispatch: return f(static_cast<DispatchCmd*>(cmd));
+	case CT::dispatchIndirect: return f(static_cast<DispatchIndirectCmd*>(cmd));
+	case CT::dispatchBase: return f(static_cast<DispatchBaseCmd*>(cmd));
+	case CT::copyImage: return f(static_cast<CopyImageCmd*>(cmd));
+	case CT::copyBufferToImage: return f(static_cast<CopyBufferToImageCmd*>(cmd));
+	case CT::copyImageToBuffer: return f(static_cast<CopyImageToBufferCmd*>(cmd));
+	case CT::blitImage: return f(static_cast<BlitImageCmd*>(cmd));
+	case CT::resolveImage: return f(static_cast<ResolveImageCmd*>(cmd));
+	case CT::copyBuffer: return f(static_cast<CopyBufferCmd*>(cmd));
+	case CT::updateBuffer: return f(static_cast<UpdateBufferCmd*>(cmd));
+	case CT::fillBuffer: return f(static_cast<FillBufferCmd*>(cmd));
+	case CT::clearColorImage: return f(static_cast<ClearColorImageCmd*>(cmd));
+	case CT::clearDepthStencilImage: return f(static_cast<ClearDepthStencilImageCmd*>(cmd));
+	case CT::clearAttachment: return f(static_cast<ClearAttachmentCmd*>(cmd));
+	case CT::setEvent: return f(static_cast<SetEventCmd*>(cmd));
+	case CT::setEvent2: return f(static_cast<SetEvent2Cmd*>(cmd));
+	case CT::resetEvent: return f(static_cast<ResetEventCmd*>(cmd));
+	case CT::executeCommandsChild: return f(static_cast<ExecuteCommandsChildCmd*>(cmd));
+	case CT::executeCommands: return f(static_cast<ExecuteCommandsCmd*>(cmd));
+	case CT::beginDebugUtilsLabel: return f(static_cast<BeginDebugUtilsLabelCmd*>(cmd));
+	case CT::endDebugUtilsLabel: return f(static_cast<EndDebugUtilsLabelCmd*>(cmd));
+	case CT::insertDebugUtilsLabel: return f(static_cast<InsertDebugUtilsLabelCmd*>(cmd));
+	case CT::bindPipeline: return f(static_cast<BindPipelineCmd*>(cmd));
+	case CT::pushConstants: return f(static_cast<PushConstantsCmd*>(cmd));
+	case CT::setViewport: return f(static_cast<SetViewportCmd*>(cmd));
+	case CT::setScissor: return f(static_cast<SetScissorCmd*>(cmd));
+	case CT::setLineWidth: return f(static_cast<SetLineWidthCmd*>(cmd));
+	case CT::setDepthBias: return f(static_cast<SetDepthBiasCmd*>(cmd));
+	case CT::setDepthBounds: return f(static_cast<SetDepthBoundsCmd*>(cmd));
+	case CT::setBlendConstants: return f(static_cast<SetBlendConstantsCmd*>(cmd));
+	case CT::setStencilCompareMask: return f(static_cast<SetStencilCompareMaskCmd*>(cmd));
+	case CT::setStencilWriteMask: return f(static_cast<SetStencilWriteMaskCmd*>(cmd));
+	case CT::setStencilReference: return f(static_cast<SetStencilReferenceCmd*>(cmd));
+	case CT::beginQuery: return f(static_cast<BeginQueryCmd*>(cmd));
+	case CT::endQuery: return f(static_cast<EndQueryCmd*>(cmd));
+	case CT::resetQueryPool: return f(static_cast<ResetQueryPoolCmd*>(cmd));
+	case CT::writeTimestamp: return f(static_cast<WriteTimestampCmd*>(cmd));
+	case CT::copyQueryPoolResults: return f(static_cast<CopyQueryPoolResultsCmd*>(cmd));
+	case CT::pushDescriptorSet: return f(static_cast<PushDescriptorSetCmd*>(cmd));
+	case CT::pushDescriptorSetWithTemplate: return f(static_cast<PushDescriptorSetWithTemplateCmd*>(cmd));
+	case CT::setFragmentShadingRate: return f(static_cast<SetFragmentShadingRateCmd*>(cmd));
+	case CT::beginConditionalRendering: return f(static_cast<BeginConditionalRenderingCmd*>(cmd));
+	case CT::endConditionalRendering: return f(static_cast<EndConditionalRenderingCmd*>(cmd));
+	case CT::setLineStipple: return f(static_cast<SetLineStippleCmd*>(cmd));
+	case CT::setCullMode: return f(static_cast<SetCullModeCmd*>(cmd));
+	case CT::setFrontFace: return f(static_cast<SetFrontFaceCmd*>(cmd));
+	case CT::setPrimitiveTopology: return f(static_cast<SetPrimitiveTopologyCmd*>(cmd));
+	case CT::setViewportWithCount: return f(static_cast<SetViewportWithCountCmd*>(cmd));
+	case CT::setScissorWithCount: return f(static_cast<SetScissorWithCountCmd*>(cmd));
+	case CT::setDepthTestEnable: return f(static_cast<SetDepthTestEnableCmd*>(cmd));
+	case CT::setDepthWriteEnable: return f(static_cast<SetDepthWriteEnableCmd*>(cmd));
+	case CT::setDepthCompareOp: return f(static_cast<SetDepthCompareOpCmd*>(cmd));
+	case CT::setDepthBoundsTestEnable: return f(static_cast<SetDepthBoundsTestEnableCmd*>(cmd));
+	case CT::setStencilTestEnable: return f(static_cast<SetStencilTestEnableCmd*>(cmd));
+	case CT::setStencilOp: return f(static_cast<SetStencilOpCmd*>(cmd));
+	case CT::setPatchControlPoints: return f(static_cast<SetPatchControlPointsCmd*>(cmd));
+	case CT::setRasterizerDiscardEnable: return f(static_cast<SetRasterizerDiscardEnableCmd*>(cmd));
+	case CT::setDepthBiasEnable: return f(static_cast<SetDepthBiasEnableCmd*>(cmd));
+	case CT::setLogicOp: return f(static_cast<SetLogicOpCmd*>(cmd));
+	case CT::setPrimitiveRestartEnable: return f(static_cast<SetPrimitiveRestartEnableCmd*>(cmd));
+	case CT::setSampleLocations: return f(static_cast<SetSampleLocationsCmd*>(cmd));
+	case CT::setDisacrdRectangle: return f(static_cast<SetDiscardRectangleCmd*>(cmd));
+	case CT::copyAccelStruct: return f(static_cast<CopyAccelStructCmd*>(cmd));
+	case CT::copyAccelStructToMemory: return f(static_cast<CopyAccelStructToMemoryCmd*>(cmd));
+	case CT::copyMemoryToAccelStruct: return f(static_cast<CopyMemoryToAccelStructCmd*>(cmd));
+	case CT::writeAccelStructsProperties: return f(static_cast<WriteAccelStructsPropertiesCmd*>(cmd));
+	case CT::buildAccelStructs: return f(static_cast<BuildAccelStructsCmd*>(cmd));
+	case CT::buildAccelStructsIndirect: return f(static_cast<BuildAccelStructsIndirectCmd*>(cmd));
+	case CT::traceRays: return f(static_cast<TraceRaysCmd*>(cmd));
+	case CT::traceRaysIndirect: return f(static_cast<TraceRaysIndirectCmd*>(cmd));
+	case CT::setRayTracingPipelineStackSize: return f(static_cast<SetRayTracingPipelineStackSizeCmd*>(cmd));
+	case CT::beginRendering: return f(static_cast<BeginRenderingCmd*>(cmd));
+	case CT::endRendering: return f(static_cast<EndRenderingCmd*>(cmd));
+	case CT::setVertexInput: return f(static_cast<SetVertexInputCmd*>(cmd));
+	case CT::setColorWriteEnable: return f(static_cast<SetColorWriteEnableCmd*>(cmd));
+	case CT::bindShaders: return f(static_cast<BindShadersCmd*>(cmd));
+	case CT::setDepthClampRange: return f(static_cast<SetDepthClampRangeCmd*>(cmd));
+	case CT::drawMeshTasks: return f(static_cast<DrawMeshTasksCmd*>(cmd));
+	case CT::drawMeshTasksIndirect: return f(static_cast<DrawMeshTasksIndirectCmd*>(cmd));
+	case CT::drawMeshTasksIndirectCount: return f(static_cast<DrawMeshTasksIndirectCountCmd*>(cmd));
+	case CT::count:
+		dlg_error("Invalid command type");
+	// NOTE: no default case by design so that we get compiler warnings about
+	// missing cases here.
+	}
+}
 
 template<typename F>
-struct TemplateCommandVisitor : CommandVisitor {
-	F f;
+void castCommandType(Command& cmd, F&& f) {
+	return castCommandType(cmd.type(), &cmd, f);
+}
 
-	TemplateCommandVisitor(F xf) : f(std::move(xf)) {}
-
-	void visit(const Command& cmd) override { f(cmd); }
-	void visit(const ParentCommand& cmd) override { f(cmd); }
-	void visit(const SectionCommand& cmd) override { f(cmd); }
-	void visit(const RenderSectionCommand& cmd) override { f(cmd); }
-	void visit(const RootCommand& cmd) override { f(cmd); }
-
-	void visit(const BeginRenderPassCmd& cmd) override { f(cmd); }
-	void visit(const EndRenderPassCmd& cmd) override { f(cmd); }
-	void visit(const SubpassCmd& cmd) override { f(cmd); }
-	void visit(const FirstSubpassCmd& cmd) override { f(cmd); }
-	void visit(const NextSubpassCmd& cmd) override { f(cmd); }
-
-	void visit(const BeginRenderingCmd& cmd) override { f(cmd); }
-	void visit(const EndRenderingCmd& cmd) override { f(cmd); }
-
-	void visit(const BeginDebugUtilsLabelCmd& cmd) override { f(cmd); }
-	void visit(const EndDebugUtilsLabelCmd& cmd) override { f(cmd); }
-	void visit(const InsertDebugUtilsLabelCmd& cmd) override { f(cmd); }
-
-	void visit(const StateCmdBase& cmd) override { f(cmd); }
-	void visit(const DrawCmdBase& cmd) override { f(cmd); }
-	void visit(const DrawCmd& cmd) override { f(cmd); }
-	void visit(const DrawIndexedCmd& cmd) override { f(cmd); }
-	void visit(const DrawIndirectCmd& cmd) override { f(cmd); }
-	void visit(const DrawIndirectCountCmd& cmd) override { f(cmd); }
-	void visit(const DrawMultiCmd& cmd) override { f(cmd); }
-	void visit(const DrawMultiIndexedCmd& cmd) override { f(cmd); }
-
-	void visit(const DispatchCmdBase& cmd) override { f(cmd); }
-	void visit(const DispatchCmd& cmd) override { f(cmd); }
-	void visit(const DispatchIndirectCmd& cmd) override { f(cmd); }
-	void visit(const DispatchBaseCmd& cmd) override { f(cmd); }
-
-	void visit(const CopyImageCmd& cmd) override { f(cmd); }
-	void visit(const CopyBufferToImageCmd& cmd) override { f(cmd); }
-	void visit(const CopyImageToBufferCmd& cmd) override { f(cmd); }
-	void visit(const BlitImageCmd& cmd) override { f(cmd); }
-	void visit(const ResolveImageCmd& cmd) override { f(cmd); }
-	void visit(const CopyBufferCmd& cmd) override { f(cmd); }
-	void visit(const UpdateBufferCmd& cmd) override { f(cmd); }
-	void visit(const FillBufferCmd& cmd) override { f(cmd); }
-	void visit(const ClearColorImageCmd& cmd) override { f(cmd); }
-	void visit(const ClearDepthStencilImageCmd& cmd) override { f(cmd); }
-	void visit(const ClearAttachmentCmd& cmd) override { f(cmd); }
-
-	void visit(const SetEventCmd& cmd) override { f(cmd); }
-	void visit(const SetEvent2Cmd& cmd) override { f(cmd); }
-	void visit(const ResetEventCmd& cmd) override { f(cmd); }
-
-	void visit(const ExecuteCommandsChildCmd& cmd) override { f(cmd); }
-	void visit(const ExecuteCommandsCmd& cmd) override { f(cmd); }
-
-	void visit(const TraceRaysCmdBase& cmd) override { f(cmd); }
-	void visit(const TraceRaysCmd& cmd) override { f(cmd); }
-	void visit(const TraceRaysIndirectCmd& cmd) override { f(cmd); }
-
-	void visit(const BeginConditionalRenderingCmd& cmd) override { f(cmd); }
-	void visit(const EndConditionalRenderingCmd& cmd) override { f(cmd); }
-
-	void visit(const BarrierCmdBase& cmd) override { f(cmd); }
-	void visit(const Barrier2CmdBase& cmd) override { f(cmd); }
-
-	void visit(const WaitEventsCmd& cmd) override { f(cmd); }
-	void visit(const BarrierCmd& cmd) override { f(cmd); }
-	void visit(const WaitEvents2Cmd& cmd) override { f(cmd); }
-	void visit(const Barrier2Cmd& cmd) override { f(cmd); }
-
-	void visit(const BindVertexBuffersCmd& cmd) override { f(cmd); }
-	void visit(const BindIndexBufferCmd& cmd) override { f(cmd); }
-	void visit(const BindPipelineCmd& cmd) override { f(cmd); }
-	void visit(const BindDescriptorSetCmd& cmd) override { f(cmd); }
-	void visit(const SetScissorCmd& cmd) override { f(cmd); }
-	void visit(const SetViewportCmd& cmd) override { f(cmd); }
-	void visit(const SetLineWidthCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthBiasCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthBoundsCmd& cmd) override { f(cmd); }
-	void visit(const SetBlendConstantsCmd& cmd) override { f(cmd); }
-	void visit(const SetStencilCompareMaskCmd& cmd) override { f(cmd); }
-	void visit(const SetStencilWriteMaskCmd& cmd) override { f(cmd); }
-	void visit(const SetStencilReferenceCmd& cmd) override { f(cmd); }
-
-	void visit(const BeginQueryCmd& cmd) override { f(cmd); }
-	void visit(const EndQueryCmd& cmd) override { f(cmd); }
-	void visit(const ResetQueryPoolCmd& cmd) override { f(cmd); }
-	void visit(const WriteTimestampCmd& cmd) override { f(cmd); }
-	void visit(const CopyQueryPoolResultsCmd& cmd) override { f(cmd); }
-
-	void visit(const PushConstantsCmd& cmd) override { f(cmd); }
-	void visit(const PushDescriptorSetCmd& cmd) override { f(cmd); }
-	void visit(const PushDescriptorSetWithTemplateCmd& cmd) override { f(cmd); }
-	void visit(const SetFragmentShadingRateCmd& cmd) override { f(cmd); }
-
-	void visit(const SetLineStippleCmd& cmd) override { f(cmd); }
-	void visit(const SetCullModeCmd& cmd) override { f(cmd); }
-	void visit(const SetFrontFaceCmd& cmd) override { f(cmd); }
-	void visit(const SetPrimitiveTopologyCmd& cmd) override { f(cmd); }
-	void visit(const SetScissorWithCountCmd& cmd) override { f(cmd); }
-	void visit(const SetViewportWithCountCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthTestEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthWriteEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthCompareOpCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthBoundsTestEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetStencilTestEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetStencilOpCmd& cmd) override { f(cmd); }
-	void visit(const SetPatchControlPointsCmd& cmd) override { f(cmd); }
-	void visit(const SetRasterizerDiscardEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthBiasEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetLogicOpCmd& cmd) override { f(cmd); }
-	void visit(const SetPrimitiveRestartEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetSampleLocationsCmd& cmd) override { f(cmd); }
-	void visit(const SetDiscardRectangleCmd& cmd) override { f(cmd); }
-	void visit(const SetVertexInputCmd& cmd) override { f(cmd); }
-	void visit(const SetColorWriteEnableCmd& cmd) override { f(cmd); }
-	void visit(const SetDepthClampRangeCmd& cmd) override { f(cmd); }
-
-	void visit(const BindShadersCmd& cmd) override { f(cmd); }
-
-	void visit(const CopyAccelStructCmd& cmd) override { f(cmd); }
-	void visit(const CopyAccelStructToMemoryCmd& cmd) override { f(cmd); }
-	void visit(const CopyMemoryToAccelStructCmd& cmd) override { f(cmd); }
-	void visit(const WriteAccelStructsPropertiesCmd& cmd) override { f(cmd); }
-	void visit(const BuildAccelStructsCmd& cmd) override { f(cmd); }
-	void visit(const BuildAccelStructsIndirectCmd& cmd) override { f(cmd); }
-	void visit(const SetRayTracingPipelineStackSizeCmd& cmd) override { f(cmd); }
-};
-
-template<typename C>
-void doVisit(CommandVisitor& v, C& cmd) {
-	templatize<C>(v).visit(cmd);
+template<typename F>
+void castCommandType(const Command& cmd, F&& f) {
+	return castCommandType(cmd.type(), const_cast<Command*>(&cmd), f);
 }
 
 // Return true for indirect commands (i.e. state or transfer commands that
