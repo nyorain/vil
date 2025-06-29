@@ -48,6 +48,8 @@ struct CommandLoader : CommandSerializer<StateLoader, LoadBuf> {
 		CommandSerializer(a, b, *c.record_), builder(c) {}
 };
 
+Command& loadCommand(CommandLoader& loader);
+
 // saver
 template<typename CmdType>
 void fwdVisit(CommandSaver& slz, const CmdType& cmd) {
@@ -65,156 +67,10 @@ void fwdVisit(CommandSaver& slz, const CmdType& cmd) {
 // loader
 template<typename Slz>
 void saveCommand(Slz& slz, Command& cmd) {
-	auto visitor = TemplateCommandVisitor([&slz](auto& cmd) {
-		fwdVisit(slz, cmd);
-	});
-	cmd.visit(visitor);
-}
-
-// load command
-template<typename Cmd>
-struct CommandCreator {
-	static Command& load(CommandLoader& loader) {
-		auto& cmd = *loader.builder.record_->alloc.allocRaw<Cmd>();
-		loader.builder.append(cmd);
-		serialize(loader, loader.io, cmd);
-		return cmd;
-	}
-};
-
-constexpr auto creators = std::array{
-	&CommandCreator<RootCommand>::load,
-	&CommandCreator<WaitEventsCmd>::load,
-	&CommandCreator<WaitEvents2Cmd>::load,
-	&CommandCreator<BarrierCmd>::load,
-	&CommandCreator<Barrier2Cmd>::load,
-	&CommandCreator<BeginRenderPassCmd>::load,
-	&CommandCreator<NextSubpassCmd>::load,
-	&CommandCreator<FirstSubpassCmd>::load,
-	&CommandCreator<EndRenderPassCmd>::load,
-	&CommandCreator<DrawCmd>::load,
-	&CommandCreator<DrawIndirectCmd>::load,
-	&CommandCreator<DrawIndexedCmd>::load,
-	&CommandCreator<DrawIndirectCountCmd>::load,
-	&CommandCreator<DrawMultiCmd>::load,
-	&CommandCreator<DrawMultiIndexedCmd>::load,
-	&CommandCreator<BindVertexBuffersCmd>::load,
-	&CommandCreator<BindIndexBufferCmd>::load,
-	&CommandCreator<BindDescriptorSetCmd>::load,
-	&CommandCreator<DispatchCmd>::load,
-	&CommandCreator<DispatchIndirectCmd>::load,
-	&CommandCreator<DispatchBaseCmd>::load,
-	&CommandCreator<CopyImageCmd>::load,
-	&CommandCreator<CopyBufferToImageCmd>::load,
-	&CommandCreator<CopyImageToBufferCmd>::load,
-	&CommandCreator<BlitImageCmd>::load,
-	&CommandCreator<ResolveImageCmd>::load,
-	&CommandCreator<CopyBufferCmd>::load,
-	&CommandCreator<UpdateBufferCmd>::load,
-	&CommandCreator<FillBufferCmd>::load,
-	&CommandCreator<ClearColorImageCmd>::load,
-	&CommandCreator<ClearDepthStencilImageCmd>::load,
-	&CommandCreator<ClearAttachmentCmd>::load,
-	&CommandCreator<SetEventCmd>::load,
-	&CommandCreator<SetEvent2Cmd>::load,
-	&CommandCreator<ResetEventCmd>::load,
-	&CommandCreator<ExecuteCommandsChildCmd>::load,
-	&CommandCreator<ExecuteCommandsCmd>::load,
-	&CommandCreator<BeginDebugUtilsLabelCmd>::load,
-	&CommandCreator<EndDebugUtilsLabelCmd>::load,
-	&CommandCreator<InsertDebugUtilsLabelCmd>::load,
-	&CommandCreator<BindPipelineCmd>::load,
-	&CommandCreator<PushConstantsCmd>::load,
-	&CommandCreator<SetViewportCmd>::load,
-	&CommandCreator<SetScissorCmd>::load,
-	&CommandCreator<SetLineWidthCmd>::load,
-	&CommandCreator<SetDepthBiasCmd>::load,
-	&CommandCreator<SetDepthBoundsCmd>::load,
-	&CommandCreator<SetBlendConstantsCmd>::load,
-	&CommandCreator<SetStencilCompareMaskCmd>::load,
-	&CommandCreator<SetStencilWriteMaskCmd>::load,
-	&CommandCreator<SetStencilReferenceCmd>::load,
-	&CommandCreator<BeginQueryCmd>::load,
-	&CommandCreator<EndQueryCmd>::load,
-	&CommandCreator<ResetQueryPoolCmd>::load,
-	&CommandCreator<WriteTimestampCmd>::load,
-	&CommandCreator<CopyQueryPoolResultsCmd>::load,
-	&CommandCreator<PushDescriptorSetCmd>::load,
-	&CommandCreator<PushDescriptorSetWithTemplateCmd>::load,
-	&CommandCreator<SetFragmentShadingRateCmd>::load,
-	&CommandCreator<BeginConditionalRenderingCmd>::load,
-	&CommandCreator<EndConditionalRenderingCmd>::load,
-	&CommandCreator<SetLineStippleCmd>::load,
-	&CommandCreator<SetCullModeCmd>::load,
-	&CommandCreator<SetFrontFaceCmd>::load,
-	&CommandCreator<SetPrimitiveTopologyCmd>::load,
-	&CommandCreator<SetViewportWithCountCmd>::load,
-	&CommandCreator<SetScissorWithCountCmd>::load,
-	&CommandCreator<SetDepthTestEnableCmd>::load,
-	&CommandCreator<SetDepthWriteEnableCmd>::load,
-	&CommandCreator<SetDepthCompareOpCmd>::load,
-	&CommandCreator<SetDepthBoundsTestEnableCmd>::load,
-	&CommandCreator<SetStencilTestEnableCmd>::load,
-	&CommandCreator<SetStencilOpCmd>::load,
-	&CommandCreator<SetPatchControlPointsCmd>::load,
-	&CommandCreator<SetRasterizerDiscardEnableCmd>::load,
-	&CommandCreator<SetDepthBiasEnableCmd>::load,
-	&CommandCreator<SetLogicOpCmd>::load,
-	&CommandCreator<SetPrimitiveRestartEnableCmd>::load,
-	&CommandCreator<SetSampleLocationsCmd>::load,
-	&CommandCreator<SetDiscardRectangleCmd>::load,
-	&CommandCreator<CopyAccelStructCmd>::load,
-	&CommandCreator<CopyAccelStructToMemoryCmd>::load,
-	&CommandCreator<CopyMemoryToAccelStructCmd>::load,
-	&CommandCreator<WriteAccelStructsPropertiesCmd>::load,
-	&CommandCreator<BuildAccelStructsCmd>::load,
-	&CommandCreator<BuildAccelStructsIndirectCmd>::load,
-	&CommandCreator<TraceRaysCmd>::load,
-	&CommandCreator<TraceRaysIndirectCmd>::load,
-	&CommandCreator<SetRayTracingPipelineStackSizeCmd>::load,
-	&CommandCreator<BeginRenderPassCmd>::load,
-	&CommandCreator<EndRenderingCmd>::load,
-	&CommandCreator<SetVertexInputCmd>::load,
-	&CommandCreator<SetColorWriteEnableCmd>::load,
-	&CommandCreator<BindShadersCmd>::load,
-	&CommandCreator<SetDepthClampRangeCmd>::load,
-};
-
-Command& loadCommand(CommandLoader& loader) {
-	// make sure the enum/array don't get out of sync
-	// All things stochastic, so why not 'stochastic assertions'?!
-	static_assert(creators[u32(CommandType::root)] ==
-		&CommandCreator<RootCommand>::load);
-	static_assert(creators[u32(CommandType::draw)] ==
-		&CommandCreator<DrawCmd>::load);
-	static_assert(creators[u32(CommandType::fillBuffer)] ==
-		&CommandCreator<FillBufferCmd>::load);
-	static_assert(creators[u32(CommandType::pushDescriptorSet)] ==
-		&CommandCreator<PushDescriptorSetCmd>::load);
-	static_assert(creators[u32(CommandType::traceRays)] ==
-		&CommandCreator<TraceRaysCmd>::load);
-	static_assert(creators[u32(CommandType::setColorWriteEnable)] ==
-		&CommandCreator<SetColorWriteEnableCmd>::load);
-
-	static_assert(u32(CommandType::count) == creators.size(),
-		"Add creator for new command type in array!");
-
-	auto off = loader.slz.recordOffset();
-
-	auto cmdType = read<CommandType>(loader.io);
-	dlg_assert_or(u32(cmdType) < creators.size(),
-		throw std::invalid_argument("Invalid command type"));
-
-	serializeMarker(loader.io, markerStartCommand + u64(cmdType), "Command");
-
-	auto creator = creators[u32(cmdType)];
-	auto& cmd = creator(loader);
-	dlg_assert(cmd.type() == cmdType);
-
-	loader.slz.offsetToCommand[off] = &cmd;
-	loader.slz.commandToOffset[&cmd] = off;
-
-	return cmd;
+	auto cb = [&](auto* cmd) {
+		fwdVisit(slz, *cmd);
+	};
+	castCommandType(cmd.type(), &cmd, cb);
 }
 
 template<typename Slz, typename IO>
@@ -811,6 +667,35 @@ void serialize(Slz& slz, IO& io, Cmd& cmd) {
 }
 
 // TODO: serializing of RootCommand currently not handled symmetrically
+
+Command& loadCommand(CommandLoader& loader) {
+	auto off = loader.slz.recordOffset();
+
+	auto cmdType = read<CommandType>(loader.io);
+
+	Command* createdCmd {};
+	auto fwdCreateCommand = [&](auto* cmdType) {
+		using CmdType = std::remove_reference_t<decltype(*cmdType)>;
+		auto& cmd = *loader.builder.record_->alloc.allocRaw<CmdType>();
+		loader.builder.append(cmd);
+		serialize(loader, loader.io, cmd);
+		createdCmd = &cmd;
+	};
+
+	serializeMarker(loader.io, markerStartCommand + u64(cmdType), "Command");
+
+	castCommandType(cmdType, nullptr, fwdCreateCommand);
+	if (!createdCmd) {
+		throw std::invalid_argument("Invalid command type");
+	}
+	dlg_assert(createdCmd->type() == cmdType);
+
+	loader.slz.offsetToCommand[off] = createdCmd;
+	loader.slz.commandToOffset[createdCmd] = off;
+
+	return *createdCmd;
+}
+
 
 // entry points
 void loadRecord(StateLoader& loader, IntrusivePtr<CommandRecord> recPtr, LoadBuf& io) {

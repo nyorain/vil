@@ -266,6 +266,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			return true;
 		}
 
+		// TODO: rework!
 		auto inside =
 				x > wp.guiWinPos.x &&
 				y > wp.guiWinPos.y &&

@@ -244,7 +244,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 			return nullptr;
 		}
 	} else {
-		if(!window->createDisplay()) {
+		if(!window->createDisplay(ini)) {
 			return nullptr;
 		}
 	}
