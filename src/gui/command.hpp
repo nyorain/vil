@@ -79,6 +79,8 @@ private:
 	// Can only be called once per frame
 	void displayImage(Draw& draw, const CopiedImage& img);
 
+	void showDebugPopup();
+
 	CommandSelection& selection() const;
 
 private:

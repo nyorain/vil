@@ -11,6 +11,10 @@
 #include <vkutil/enumString.hpp>
 #include <chrono>
 
+#ifdef SWA_WITH_X11
+#include <swa/x11.h>
+#endif
+
 // NOTE: we know event calls always happen in the same thread as rendering
 // so we don't need to use gui-internal even queue and can access imguiIO
 // directly
@@ -76,7 +80,8 @@ DisplayWindow::~DisplayWindow() {
 	}
 }
 
-bool DisplayWindow::createDisplay() {
+bool DisplayWindow::createDisplay(Instance& ini) {
+	this->ini = &ini;
 	state_.store(State::createDisplay);
 	this->thread_ = std::thread([&]{ uiThread(); });
 
@@ -369,7 +374,26 @@ void DisplayWindow::destroyBuffers() {
 }
 
 bool DisplayWindow::doCreateDisplay() {
-	dpy = swa_display_autocreate("VIL");
+	constexpr auto appname = "VIL";
+
+#if defined(SWA_WITH_X11) && defined(SWA_WITH_WL)
+	// workaround: swa tries to select wayland when available by default.
+	// But applications running on X11 (via xwayland) will likely not
+	// have wayland extension enabled.
+	// TODO: should extend swa to be able to create vk surfaces via Xlib
+	// as well, in case applications only have that supported.
+	if(ini) {
+		if(contains(ini->extensions, "VK_KHR_xcb_surface") &&
+				!contains(ini->extensions, "VK_KHR_wayland_surface")) {
+			dpy = swa_display_x11_create(appname);
+			if(dpy) {
+				return true;
+			}
+		}
+	}
+#endif
+
+	dpy = swa_display_autocreate(appname);
 	return dpy != nullptr;
 }
 

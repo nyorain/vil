@@ -3780,4 +3780,78 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplate2(
 	cb.dev->dispatch.CmdPushDescriptorSetWithTemplate2(cb.handle, &info);
 }
 
+// VK_EXT_mesh_shader
+VKAPI_ATTR void VKAPI_CALL CmdDrawMeshTasksEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    groupCountX,
+		uint32_t                                    groupCountY,
+		uint32_t                                    groupCountZ) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<DrawMeshTasksCmd>(cb, cb);
+
+	cmd.groupCountX = groupCountX;
+	cmd.groupCountY = groupCountY;
+	cmd.groupCountZ = groupCountZ;
+
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawMeshTasksEXT(cb.handle,
+			groupCountX, groupCountY, groupCountZ);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawMeshTasksIndirectEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		uint32_t                                    drawCount,
+		uint32_t                                    stride) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<DrawMeshTasksIndirectCmd>(cb, cb);
+
+	cmd.offset = offset;
+	cmd.stride = stride;
+	cmd.drawCount = drawCount;
+	cmd.buffer = &get(*cb.dev, buffer);
+	useHandle(cb, cmd, *cmd.buffer);
+
+	{
+		ExtZoneScopedN("dispatch");
+		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawMeshTasksIndirectCountEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		VkBuffer                                    countBuffer,
+		VkDeviceSize                                countBufferOffset,
+		uint32_t                                    maxDrawCount,
+		uint32_t                                    stride) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<DrawMeshTasksIndirectCountCmd>(cb, cb);
+
+	cmd.offset = offset;
+	cmd.stride = stride;
+	cmd.maxDrawCount = maxDrawCount;
+	cmd.buffer = &get(*cb.dev, buffer);
+	cmd.countBuffer = &get(*cb.dev, countBuffer);
+	cmd.countOffset = countBufferOffset;
+
+	useHandle(cb, cmd, *cmd.buffer);
+	useHandle(cb, cmd, *cmd.countBuffer);
+
+	{
+		ExtZoneScopedN("dispatch");
+		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+	}
+}
+
 } // namespace vil

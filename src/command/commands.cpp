@@ -901,6 +901,22 @@ void DrawMultiIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) con
 		vertexOffset ? &*vertexOffset : nullptr);
 }
 
+// DrawMeshTasks
+void DrawMeshTasksCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdDrawMeshTasksEXT(cb, groupCountX, groupCountY, groupCountZ);
+}
+
+void DrawMeshTasksIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdDrawMeshTasksIndirectEXT(cb,
+		buffer->handle, offset, drawCount, stride);
+}
+
+void DrawMeshTasksIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdDrawMeshTasksIndirectCountEXT(cb,
+		buffer->handle, offset, countBuffer->handle, countOffset,
+		maxDrawCount, stride);
+}
+
 // BindVertexBuffersCmd
 void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	std::vector<VkBuffer> vkbuffers;
