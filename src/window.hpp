@@ -32,7 +32,7 @@ struct DisplayWindow {
 
 	VkSemaphore acquireSem {};
 
-	bool createDisplay();
+	bool createDisplay(Instance&);
 	bool createWindow(Instance&);
 	bool initDevice(Device& dev);
 	void resize(unsigned w, unsigned h);
@@ -55,6 +55,7 @@ private:
 	VkDeviceMemory depthMemory_ {};
 
 	std::vector<RenderBuffer> buffers_;
+	std::vector<const char*> devExts_;
 
 	enum class State {
 		initial,

@@ -250,4 +250,17 @@ inline bool imGuiCheckbox(nytl::StringParam name, std::atomic<bool>& flag) {
 	return false;
 }
 
+// copied from ImGui::BeginPopup, but allows to pass ID
+inline bool imGuiBeginPopup(ImGuiID id, ImGuiWindowFlags flags = 0)
+{
+    ImGuiContext& g = *GImGui;
+    if (g.OpenPopupStack.Size <= g.BeginPopupStack.Size) // Early out for performance
+    {
+        g.NextWindowData.ClearFlags(); // We behave like Begin() and need to consume those values
+        return false;
+    }
+    flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings;
+    return ImGui::BeginPopupEx(id, flags);
+}
+
 } // namesapce vil

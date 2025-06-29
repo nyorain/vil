@@ -717,12 +717,20 @@ void CommandViewer::displayIOList() {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
-		ImGui::TreeNodeEx("Vertex input", flags);
-		if(ImGui::IsItemActivated()) {
+		// TODO: support vertex viewer for mesh shaders
+		auto disabled = drawCmd->boundPipe()->hasMeshShader;
+		pushDisabled(disabled);
+
+		ImGui::TreeNodeEx("Vertices", flags);
+		if(disabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::SetTooltip("Not available for mesh shader draw calls");
+		} else if(ImGui::IsItemActivated()) {
 			view_ = IOView::mesh;
 			viewData_.mesh = {true};
 			updateHook();
 		}
+
+		popDisabled(disabled);
 	}
 
 	// Descriptors
@@ -1620,6 +1628,7 @@ void CommandViewer::draw(Draw& draw, bool skipList) {
 	ZoneScoped;
 
 	showBeforeCheckbox_ = false;
+	showDebugPopup();
 
 	if(command_.empty()) {
 		imGuiText("No command selected");
@@ -1639,6 +1648,21 @@ void CommandViewer::draw(Draw& draw, bool skipList) {
 	}
 
 	displayActionInspector(draw, skipList);
+}
+
+void CommandViewer::showDebugPopup() {
+	if (!gui_->showDebug) {
+		return;
+	}
+
+	if(ImGui::Begin("vil_debug")) {
+		if(ImGui::CollapsingHeader("CommandViewer")) {
+			imGuiText("view_ {}", u32(view_));
+			imGuiText("record {}", (void*) record_.get());
+			imGuiText("command {}", command_.empty() ? "<null>" : (void*) command_.back());
+		}
+	}
+	ImGui::End();
 }
 
 void CommandViewer::updateHook() {

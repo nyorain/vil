@@ -14,10 +14,10 @@ namespace {
 void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-	if(platform->status == SwaPlatform::State::focused) {
+	// if(platform->status == SwaPlatform::State::focused) {
 		// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
 		ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
-	}
+	// }
 
 	platform->onEvent();
 }
@@ -28,6 +28,7 @@ void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 	bool forward = platform->status == SwaPlatform::State::shown;
 	bool handle = platform->status == SwaPlatform::State::focused;
 
+	/*
 	auto inside =
 		ev->x > platform->guiWinPos.x &&
 		ev->y > platform->guiWinPos.y &&
@@ -45,10 +46,9 @@ void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 		handle = true;
 		forward = false;
 	}
+	*/
 
-	if(forward) {
-		platform->onEvent();
-	}
+	handle = true;
 
 	if(handle) {
 		// dlg_trace("overlay mouse button");
@@ -58,6 +58,17 @@ void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 		}
 	}
 
+	if (platform->status == SwaPlatform::State::focused && !ImGui::GetIO().WantCaptureMouse) {
+		platform->status = SwaPlatform::State::shown;
+	} else if (platform->status == SwaPlatform::State::shown && ImGui::GetIO().WantCaptureMouse) {
+		platform->status = SwaPlatform::State::focused;
+	}
+
+	forward = !ImGui::GetIO().WantCaptureMouse;
+
+	if(forward) {
+		platform->onEvent();
+	}
 }
 
 void cbMouseCross(swa_window* win, const swa_mouse_cross_event* ev) {

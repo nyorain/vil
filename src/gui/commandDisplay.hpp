@@ -9,7 +9,7 @@
 
 namespace vil {
 
-struct DisplayVisitor : CommandVisitor {
+struct DisplayVisitor {
 	std::unordered_set<const ParentCommand*>& openedSections_;
 
 	const Command* sel_;
@@ -78,6 +78,10 @@ struct DisplayVisitor : CommandVisitor {
 
 	// Returns whether one of the children was selected
 	bool displayCommands(const Command* cmd, bool firstSep) {
+		auto visitCb = [&](auto* castedCmd) {
+			this->visit(*castedCmd);
+		};
+
 		// TODO PERF: should use imgui list clipper, might have *a lot* of commands here.
 		// But first we have to restrict what cmd->display can actually do.
 		// Would also have to pre-filter commands for that. And stop at every
@@ -94,12 +98,12 @@ struct DisplayVisitor : CommandVisitor {
 					ImGui::Separator();
 				}
 
-				cmd->visit(*this);
+				castCommandType(*cmd, visitCb);
 				showSep = true;
 			} else {
 				// still visit it, for indentation tracking
 				// only relevant for EndDebugUtilsLabelCmd commands
-				cmd->visit(*this);
+				castCommandType(*cmd, visitCb);
 			}
 
 			cmd = cmd->next;
@@ -215,11 +219,11 @@ struct DisplayVisitor : CommandVisitor {
 	}
 
 	// == Visitor functions ==
-	void visit(const Command& cmd) override {
+	void visit(const Command& cmd) {
 		display(cmd);
 	}
 
-	void visit(const ParentCommand& cmd) override {
+	void visit(const ParentCommand& cmd) {
 		if(labelOnlyIndent_) {
 			displayAndChildren(cmd);
 		} else {
@@ -227,7 +231,7 @@ struct DisplayVisitor : CommandVisitor {
 		}
 	}
 
-	void visit(const BeginDebugUtilsLabelCmd& cmd) override {
+	void visit(const BeginDebugUtilsLabelCmd& cmd) {
 		if(labelOnlyIndent_) {
 			if(!open_) {
 				return;
@@ -246,7 +250,7 @@ struct DisplayVisitor : CommandVisitor {
 		}
 	}
 
-	void visit(const EndDebugUtilsLabelCmd& cmd) override {
+	void visit(const EndDebugUtilsLabelCmd& cmd) {
 		display(cmd);
 
 		if(labelOnlyIndent_ && indent_ > 0 && open_) {
@@ -258,7 +262,7 @@ struct DisplayVisitor : CommandVisitor {
 		open_ = true;
 	}
 
-	void visit(const BeginRenderPassCmd& cmd) override {
+	void visit(const BeginRenderPassCmd& cmd) {
 		if(labelOnlyIndent_) {
 			displayAndChildren(cmd);
 		} else {
@@ -288,7 +292,7 @@ struct DisplayVisitor : CommandVisitor {
 		}
 	}
 
-	void visit(const FirstSubpassCmd& cmd) override {
+	void visit(const FirstSubpassCmd& cmd) {
 		if(labelOnlyIndent_) {
 			// skip display of this command itself.
 			displayChildren(cmd, false);
@@ -297,7 +301,7 @@ struct DisplayVisitor : CommandVisitor {
 		}
 	}
 
-	void visit(const ExecuteCommandsCmd& cmd) override {
+	void visit(const ExecuteCommandsCmd& cmd) {
 		// lables can pass CmdExecuteCommands boundaries, even if it's weird.
 		// otherwise we could always indent here as well.
 		if(labelOnlyIndent_) {

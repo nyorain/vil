@@ -1873,6 +1873,55 @@ MatchVal match(MatchType mt, const DrawMultiIndexedCmd& a, const DrawMultiIndexe
 	return ret;
 }
 
+MatchVal match(MatchType mt, const DrawMeshTasksCmd& a, const DrawMeshTasksCmd& b) {
+	auto ret = doMatch(mt, a, b, false);
+	if(ret.total == -1.f) {
+		return ret;
+	}
+
+	add(ret, a.groupCountX, b.groupCountX);
+	add(ret, a.groupCountY, b.groupCountY);
+	add(ret, a.groupCountZ, b.groupCountZ);
+
+	return ret;
+}
+
+MatchVal match(MatchType mt, const DrawMeshTasksIndirectCmd& a, const DrawMeshTasksIndirectCmd& b) {
+	auto ret = doMatch(mt, a, b, false);
+	if(ret.total == -1.f) {
+		return ret;
+	}
+
+	if (a.stride != b.stride) {
+		return MatchVal::noMatch();
+	}
+
+	addNonNull(ret, a.buffer, b.buffer);
+	add(ret, a.drawCount, b.drawCount);
+	add(ret, a.offset, b.offset, 0.2);
+
+	return ret;
+}
+
+MatchVal match(MatchType mt, const DrawMeshTasksIndirectCountCmd& a, const DrawMeshTasksIndirectCountCmd& b) {
+	auto ret = doMatch(mt, a, b, false);
+	if(ret.total == -1.f) {
+		return ret;
+	}
+
+	if (a.stride != b.stride) {
+		return MatchVal::noMatch();
+	}
+
+	addNonNull(ret, a.buffer, b.buffer);
+	addNonNull(ret, a.countBuffer, b.countBuffer);
+	add(ret, a.maxDrawCount, b.maxDrawCount);
+	add(ret, a.offset, b.offset, 0.2);
+	add(ret, a.countOffset, b.countOffset, 0.2);
+
+	return ret;
+}
+
 MatchVal match(MatchType mt, const BindVertexBuffersCmd& a, const BindVertexBuffersCmd& b) {
 	if(a.firstBinding != b.firstBinding) {
 		return MatchVal::noMatch();
@@ -2416,12 +2465,11 @@ MatchVal invokeCommandMatch(MatchType mt, const Cmd& a, const Command& base) {
 // same type. Should not consider child commands, just itself.
 // Will also never consider the stackTrace.
 MatchVal match(const Command& a, const Command& b, MatchType matchType) {
-	MatchVal ret;
-	auto invoker = [&](const auto& cmd) {
-		ret = invokeCommandMatch(matchType, cmd, b);
+	MatchVal ret = MatchVal::noMatch();
+	auto matchFunc = [&](auto* cmd) {
+		ret = invokeCommandMatch(matchType, *cmd, b);
 	};
-	auto visitor = TemplateCommandVisitor(std::move(invoker));
-	a.visit(visitor);
+	castCommandType(a, matchFunc);
 
 	return ret;
 }
