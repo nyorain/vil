@@ -718,7 +718,7 @@ void CommandViewer::displayIOList() {
 		}
 
 		// TODO: support vertex viewer for mesh shaders
-		auto disabled = drawCmd->boundPipe()->hasMeshShader;
+		auto disabled = drawCmd->boundPipe() && drawCmd->boundPipe()->hasMeshShader;
 		pushDisabled(disabled);
 
 		ImGui::TreeNodeEx("Vertices", flags);

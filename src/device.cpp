@@ -14,6 +14,7 @@
 #include <swapchain.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <threadContext.hpp>
 #include <fault.hpp>
 #include <util/util.hpp>
@@ -75,6 +76,10 @@ Device::Device() {
 	dev.bufferViews.mutex = &dev.mutex;
 	dev.dsuTemplates.mutex = &dev.mutex;
 	dev.accelStructs.mutex = &dev.mutex;
+
+	dev.shaderObjects.mutex = &dev.mutex;
+	dev.indirectCommandsLayouts.mutex = &dev.mutex;
+	dev.indirectExecutionSets.mutex = &dev.mutex;
 }
 
 Device::~Device() {
@@ -1044,6 +1049,17 @@ VkResult doCreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.CmdPushDescriptorSetWithTemplate,
 		&dev.dispatch.CmdPushDescriptorSetWithTemplateKHR});
+	// VK_EXT_extended_dynamic_state2
+	// partially promoted to vulkan 1.3
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetRasterizerDiscardEnable,
+		&dev.dispatch.CmdSetRasterizerDiscardEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetDepthBiasEnable,
+		&dev.dispatch.CmdSetDepthBiasEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetPrimitiveRestartEnable,
+		&dev.dispatch.CmdSetPrimitiveRestartEnableEXT});
 	// maintenance6 (without descriptor buffer functionality)
 	aliasCmd(std::array{
 		&dev.dispatch.CmdPushDescriptorSet2,

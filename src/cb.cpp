@@ -9,6 +9,7 @@
 #include <queryPool.hpp>
 #include <sync.hpp>
 #include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <threadContext.hpp>
 #include <vk/typemap_helper.h>
 #include <commandHook/hook.hpp>
@@ -656,7 +657,10 @@ struct GetUsedSet {
 	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
 	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
 	static auto& get(CommandRecord& rec, const DescriptorPool&) { return rec.used.dsPools; }
+
 	static auto& get(CommandRecord& rec, const ShaderObject&) { return rec.used.shaderObjects; }
+	static auto& get(CommandRecord& rec, const IndirectCommandsLayout&) { return rec.used.indirectCommandLayouts; }
+	static auto& get(CommandRecord& rec, const IndirectExecutionSet&) { return rec.used.indirectExecutionSets; }
 };
 
 template<typename T>
@@ -2936,7 +2940,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetPatchControlPointsEXT(
 	cb.dev->dispatch.CmdSetPatchControlPointsEXT(cb.handle, patchControlPoints);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    rasterizerDiscardEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2946,7 +2950,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
 	cb.dev->dispatch.CmdSetRasterizerDiscardEnableEXT(cb.handle, rasterizerDiscardEnable);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthBiasEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2963,17 +2967,17 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
 	auto& cmd = addCmd<SetLogicOpCmd>(cb);
 	cmd.logicOp = logicOp;
 
-	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle, logicOp);
+	cb.dev->dispatch.CmdSetLogicOpEXT(cb.handle, logicOp);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    primitiveRestartEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetPrimitiveRestartEnableCmd>(cb);
 	cmd.enable = primitiveRestartEnable;
 
-	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle, primitiveRestartEnable);
+	cb.dev->dispatch.CmdSetPrimitiveRestartEnableEXT(cb.handle, primitiveRestartEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
@@ -3852,6 +3856,275 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawMeshTasksIndirectCountEXT(
 		ExtZoneScopedN("dispatch");
 		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 	}
+}
+
+// VK_EXT_device_generated_commands
+GeneratedCommandsInfo convert(CommandBuffer& cb, Command& cmd,
+		const VkGeneratedCommandsInfoEXT& info) {
+	auto& dev = *cb.dev;
+	GeneratedCommandsInfo ret {};
+	ret.preprocessAddress = info.preprocessAddress;
+	ret.preprocessSize = info.preprocessSize;
+	ret.indirectAddress = info.indirectAddress;
+	ret.indirectSize = info.indirectAddressSize;
+	ret.execSet = &get(dev, info.indirectExecutionSet);
+	ret.layout = &get(dev, info.indirectCommandsLayout);
+	ret.maxDrawCount = info.maxDrawCount;
+	ret.stages = info.shaderStages;
+	ret.sequenceCountAddress = info.sequenceCountAddress;
+	ret.maxSequenceCount = info.maxSequenceCount;
+
+	if(ret.execSet) useHandle(cb, cmd, *ret.execSet);
+	if(ret.layout) useHandle(cb, cmd, *ret.layout);
+
+	return ret;
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPreprocessGeneratedCommandsEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkGeneratedCommandsInfoEXT*           pGeneratedCommandsInfo,
+		VkCommandBuffer                             stateCommandBuffer) {
+	ExtZoneScoped;
+
+	// TODO: use handles
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<PreprocessGeneratedCommandsCmd>(cb);
+	cmd.info = convert(cb, cmd, *pGeneratedCommandsInfo);
+	cmd.state = &getCommandBuffer(stateCommandBuffer);
+
+	dlg_assert(!pGeneratedCommandsInfo->pNext);
+
+	{
+		ExtZoneScopedN("dispatch");
+		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdExecuteGeneratedCommandsEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    isPreprocessed,
+		const VkGeneratedCommandsInfoEXT*           pGeneratedCommandsInfo) {
+	ExtZoneScoped;
+
+	// TODO: use handles
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<ExecuteGeneratedCommandsCmd>(cb);
+	cmd.info = convert(cb, cmd, *pGeneratedCommandsInfo);
+	cmd.isPreprocessed = isPreprocessed;
+
+	dlg_assert(!pGeneratedCommandsInfo->pNext);
+
+	{
+		ExtZoneScopedN("dispatch");
+		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+	}
+}
+
+// VK_EXT_extended_dynamic_state3
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthClampEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthClampEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthClampEnableCmd>(cb);
+	cmd.enable = depthClampEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetPolygonModeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkPolygonMode                               polygonMode) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetPolygonModeCmd>(cb);
+	cmd.mode = polygonMode;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetRasterizationSamplesEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkSampleCountFlagBits                       rasterizationSamples) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetRasterizationSamplesCmd>(cb);
+	cmd.samples = rasterizationSamples;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetSampleMaskEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkSampleCountFlagBits                       samples,
+		const VkSampleMask*                         pSampleMask) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetSampleMaskCmd>(cb);
+	cmd.samples = samples;
+	auto count = cmd.samples == VK_SAMPLE_COUNT_64_BIT ? 2u : 1u;
+	cmd.sampleMask = copySpan(cb, pSampleMask, count);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetAlphaToCoverageEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    alphaToCoverageEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetAlphaToCoverageEnableCmd>(cb);
+	cmd.enable = alphaToCoverageEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetAlphaToOneEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    alphaToOneEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetAlphaToOneEnableCmd>(cb);
+	cmd.enable = alphaToOneEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    logicOpEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetLogicOpEnableCmd>(cb);
+	cmd.enable = logicOpEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetColorBlendEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstAttachment,
+		uint32_t                                    attachmentCount,
+		const VkBool32*                             pColorBlendEnables) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetColorBlendEnableCmd>(cb);
+	cmd.firstAttachment = firstAttachment;
+	cmd.enable = copySpan(cb, pColorBlendEnables, attachmentCount);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetColorBlendEquationEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstAttachment,
+		uint32_t                                    attachmentCount,
+		const VkColorBlendEquationEXT*              pColorBlendEquations) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetColorBlendEquationCmd>(cb);
+	cmd.firstAttachment = firstAttachment;
+	cmd.equations = copySpan(cb, pColorBlendEquations, attachmentCount);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteMaskEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstAttachment,
+		uint32_t                                    attachmentCount,
+		const VkColorComponentFlags*                pColorWriteMasks) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetColorWriteMaskCmd>(cb);
+	cmd.firstAttachment = firstAttachment;
+	cmd.colorWriteMasks = copySpan(cb, pColorWriteMasks, attachmentCount);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetTessellationDomainOriginEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkTessellationDomainOrigin                  domainOrigin) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetTessellationDomainOriginCmd>(cb);
+	cmd.domainOrigin = domainOrigin;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetRasterizationStreamEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    rasterizationStream) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetRasterizationStreamCmd>(cb);
+	cmd.rasterizationStream = rasterizationStream;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetConservativeRasterizationModeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkConservativeRasterizationModeEXT          conservativeRasterizationMode) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetConservativeRasterizationModeCmd>(cb);
+	cmd.mode = conservativeRasterizationMode;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetExtraPrimitiveOverestimationSizeEXT(
+		VkCommandBuffer                             commandBuffer,
+		float                                       extraPrimitiveOverestimationSize) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetExtraPrimitiveOverestimationSizeCmd>(cb);
+	cmd.extraPrimitiveOverestimationSize = extraPrimitiveOverestimationSize;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthClipEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthClipEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthClipEnableCmd>(cb);
+	cmd.enable = depthClipEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    sampleLocationsEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetSampleLocationsEnableCmd>(cb);
+	cmd.enable = sampleLocationsEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetColorBlendAdvancedEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstAttachment,
+		uint32_t                                    attachmentCount,
+		const VkColorBlendAdvancedEXT*              pColorBlendAdvanced) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetColorBlendAdvancedCmd>(cb);
+	cmd.firstAttachment = firstAttachment;
+	cmd.blend = copySpan(cb, pColorBlendAdvanced, attachmentCount);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetProvokingVertexModeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkProvokingVertexModeEXT                    provokingVertexMode) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetProvokingVertexModeCmd>(cb);
+	cmd.mode = provokingVertexMode;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLineRasterizationModeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkLineRasterizationModeEXT                  lineRasterizationMode) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetLineRasterizationModeCmd>(cb);
+	cmd.mode = lineRasterizationMode;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    stippledLineEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetLineStippleEnableCmd>(cb);
+	cmd.enable = stippledLineEnable;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthClipNegativeOneToOneEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    negativeOneToOne) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthClipNegativeOneToOneEXTCmd>(cb);
+	cmd.enable = negativeOneToOne;
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 } // namespace vil

@@ -1,5 +1,9 @@
 - [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
 
+- [ ] properly set shaders via CmdSetShadersEXT in ComputeState/GraphicsState
+      We rely on a pipeline being there in many places.
+	  Maybe remove StateCmdBase::boundPipe()?
+	- [ ] can test with vulkan-examples:shaderobjects sample
 - [ ] Cleanup "Show All" mess in vertex viewer
 	- [ ] additionally (orthogonally) have a checkbox that decides
 	      whether output needs to be shown in table, be copied to host
@@ -7,6 +11,11 @@
 	- [ ] optimization: When "Show All" is not active, split up draw calls
 	      Already outlined in vertexCopy.md
 
+- [ ] continue device-generated-commands extension
+	- [ ] test with https://github.com/nvpro-samples/vk_device_generated_cmds
+	      should already run out-of-the-box (fix bugs!)
+	- [ ] add indirect-command-stream reading to command hook
+	- [ ] show the indirect/generated commands (with or without read-back data) in UI
 - [ ] rename vku to vpp?
 - [ ] Textual "bound descriptor sets" inspector
 	- [ ] Allow to inspect before/after BindDescriptorSets/PushDescriptorSet

@@ -15,6 +15,7 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <rp.hpp>
+#include <gencmd.hpp>
 #include <accelStruct.hpp>
 
 namespace vil {
@@ -371,6 +372,8 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 		events(alloc),
 		dsPools(alloc),
 		shaderObjects(alloc),
+		indirectCommandLayouts(alloc),
+		indirectExecutionSets(alloc),
 		descriptorSets(alloc),
 		images(alloc) {
 }

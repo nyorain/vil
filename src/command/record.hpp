@@ -343,7 +343,10 @@ struct CommandRecord {
 		UsedHandleSet<AccelStruct> accelStructs;
 		UsedHandleSet<Event> events;
 		UsedHandleSet<DescriptorPool> dsPools;
+
 		UsedHandleSet<ShaderObject> shaderObjects;
+		UsedHandleSet<IndirectCommandsLayout> indirectCommandLayouts;
+		UsedHandleSet<IndirectExecutionSet> indirectExecutionSets;
 
 		CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
 		CommandAllocHashSet<UsedImage, RefHandleHash> images;

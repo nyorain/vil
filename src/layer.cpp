@@ -17,6 +17,7 @@
 #include <overlay.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <gencmd.hpp>
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
@@ -871,11 +872,21 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS_CORE(CmdSetStencilOpEXT, CmdSetStencilOp,
 		VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME),
 
+	// VK_EXT_EXTENDED_DYNAMIC_STATE_2
+	VIL_DEV_HOOK(CmdSetRasterizerDiscardEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetDepthBiasEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetPrimitiveRestartEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdSetRasterizerDiscardEnableEXT,  CmdSetRasterizerDiscardEnable,
+		VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdSetDepthBiasEnableEXT, CmdSetDepthBiasEnable,
+		VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdSetPrimitiveRestartEnableEXT, CmdSetPrimitiveRestartEnable,
+		VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
+
+	// NOTE: while VK_EXT_EXTENDED_DYNAMIC_STATE_2 was promoted to vulkan 1.3,
+	// these 2 functions got not promoted
 	VIL_DEV_HOOK_EXT(CmdSetPatchControlPointsEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
-	VIL_DEV_HOOK_EXT(CmdSetRasterizerDiscardEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
-	VIL_DEV_HOOK_EXT(CmdSetDepthBiasEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetLogicOpEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
-	VIL_DEV_HOOK_EXT(CmdSetPrimitiveRestartEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdBeginRendering, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK(CmdEndRendering, VK_API_VERSION_1_3),
@@ -899,9 +910,11 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdTraceRaysIndirectKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetRayTracingPipelineStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
+	// VK_EXT_shader_object
 	VIL_DEV_HOOK_EXT(CmdBindShadersEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetDepthClampRangeEXT, VK_EXT_SHADER_OBJECT_EXTENSION_NAME),
 
+	// VK_KHR_maintenance5, Vulkan 1.3
 	VIL_DEV_HOOK(CmdBindIndexBuffer2, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdBindIndexBuffer2KHR, CmdBindIndexBuffer2,
 		VK_KHR_MAINTENANCE_5_EXTENSION_NAME),
@@ -923,18 +936,70 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS_CORE(CmdWriteTimestamp2KHR, CmdWriteTimestamp2,
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
 
+	// VK_EXT_vertex_input_dynamic_state
 	VIL_DEV_HOOK_EXT(CmdSetVertexInputEXT, VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME),
 
+	// VK_EXT_color_write_enable
 	VIL_DEV_HOOK_EXT(CmdSetColorWriteEnableEXT, VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME),
 
+	// VK_EXT_multi_draw
 	VIL_DEV_HOOK_EXT(CmdDrawMultiEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdDrawMultiIndexedEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
 
+	// VK_KHR_maintenance6, Vulkan 1.4
+	VIL_DEV_HOOK(CmdBindDescriptorSets2, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK(CmdPushConstants2, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK(CmdPushDescriptorSet2, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK(CmdPushDescriptorSetWithTemplate2, VK_API_VERSION_1_4),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdBindDescriptorSets2KHR, CmdBindDescriptorSets2,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdPushConstants2KHR, CmdPushConstants2,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdPushDescriptorSet2KHR, CmdPushDescriptorSet2,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(CmdPushDescriptorSetWithTemplate2KHR, CmdPushDescriptorSetWithTemplate2,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME),
+
+	// VK_EXT_mesh_shader
 	VIL_DEV_HOOK_EXT(CmdDrawMeshTasksEXT, VK_EXT_MESH_SHADER_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdDrawMeshTasksIndirectEXT, VK_EXT_MESH_SHADER_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdDrawMeshTasksIndirectCountEXT, VK_EXT_MESH_SHADER_EXTENSION_NAME),
 
-	// For testing.
+	// VK_EXT_device_generated_commands
+	VIL_DEV_HOOK_EXT(CmdPreprocessGeneratedCommandsEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdExecuteGeneratedCommandsEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetGeneratedCommandsMemoryRequirementsEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CreateIndirectCommandsLayoutEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(DestroyIndirectCommandsLayoutEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CreateIndirectExecutionSetEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(DestroyIndirectExecutionSetEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(UpdateIndirectExecutionSetPipelineEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(UpdateIndirectExecutionSetShaderEXT, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME),
+
+	// VK_EXT_extended_dynamic_state3
+	VIL_DEV_HOOK_EXT(CmdSetDepthClampEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetPolygonModeEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetRasterizationSamplesEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetSampleMaskEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetAlphaToCoverageEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetAlphaToOneEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetLogicOpEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetColorBlendEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetColorBlendEquationEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetColorWriteMaskEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetTessellationDomainOriginEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetRasterizationStreamEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetConservativeRasterizationModeEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetExtraPrimitiveOverestimationSizeEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetDepthClipEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetSampleLocationsEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetColorBlendAdvancedEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetProvokingVertexModeEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetLineRasterizationModeEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetLineStippleEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetDepthClipNegativeOneToOneEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
+
+	// For dlss testing.
 	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
@@ -1033,11 +1098,6 @@ auto knownUnhooked = std::set<std::string>{
 	"vkGetPrivateData",
 
 	// the ones we need to hook
-	// vkCmdSetDeviceMask
-	// vkCmdSetRasterizerDiscardEnable
-	// vkCmdSetDepthBiasEnable
-	// vkCmdSetPrimitiveRestartEnable
-	//
 	// vkCreateSamplerYcbcrConversion
 	// vkDestroySamplerYcbcrConversion
 	// vkGetDescriptorSetLayoutSupport // for samplers!
@@ -1079,6 +1139,19 @@ auto knownUnhooked = std::set<std::string>{
 	// vkReleaseProfilingLockKHR
 };
 
+// Returns true if ext1 automatically enables ext2
+bool deviceExtensionEnablesOther(std::string_view ext1, std::string_view ext2) {
+	if(ext1 == VK_EXT_SHADER_OBJECT_EXTENSION_NAME) {
+		return
+			ext2 == VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME ||
+			ext2 == VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME ||
+			ext2 == VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME ||
+			ext2 == VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME;
+	}
+
+	return false;
+}
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
@@ -1109,10 +1182,16 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	}
 
 	if(!hook.devExt.empty()) {
-		auto it = find(dev->appExts, hook.devExt);
-		if(it == dev->appExts.end()) {
+		auto found = false;
+		for(auto& ext : dev->appExts) {
+			if(ext == hook.devExt || deviceExtensionEnablesOther(ext, hook.devExt)) {
+				found = true;
+				break;
+			}
+		}
+
+		if(!found) {
 			return nullptr;
-			// return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
 		}
 	}
 

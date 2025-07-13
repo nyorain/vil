@@ -797,6 +797,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
 		dlg_assert(pShaders[i]);
 
 		auto& mod = dev.shaderObjects.add(pShaders[i]);
+		mod.dev = &dev;
 		mod.handle = pShaders[i];
 		mod.dsLayouts = std::move(layoutVecs[i]);
 		pShaders[i] = castDispatch<VkShaderEXT>(mod);

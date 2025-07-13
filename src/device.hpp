@@ -233,7 +233,10 @@ struct Device {
 	SyncedIntrusiveUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
 	SyncedIntrusiveUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
 	SyncedIntrusiveUnorderedMap<VkRenderPass, RenderPass> renderPasses;
+
 	SyncedIntrusiveUnorderedMap<VkShaderEXT, ShaderObject> shaderObjects;
+	SyncedIntrusiveUnorderedMap<VkIndirectExecutionSetEXT, IndirectExecutionSet> indirectExecutionSets;
+	SyncedIntrusiveUnorderedMap<VkIndirectCommandsLayoutEXT, IndirectCommandsLayout> indirectCommandsLayouts;
 
 	SyncedIntrusiveUnorderedSet<ImageView> imageViews;
 	SyncedIntrusiveUnorderedSet<Sampler> samplers;

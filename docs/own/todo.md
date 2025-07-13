@@ -104,6 +104,8 @@ new, workstack:
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
 - [ ] cleanup: move out device_default stuff to gfr fork?
+- [ ] gencmd PreprocessGeneratedCommandsCmd::record makes invalid
+      assumptions, might cause crash. See TODO there
 
 - [ ] (low prio, ui) sparse: for images, allow to show popup with bound
       memory on hover in imageViewer. Also bond-to-memory overlay
