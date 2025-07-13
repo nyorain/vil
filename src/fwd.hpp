@@ -63,6 +63,8 @@ struct AccelStruct;
 struct PipelineShaderStage;
 struct DescriptorPoolSetEntry;
 struct ShaderObject;
+struct IndirectCommandsLayout;
+struct IndirectExecutionSet;
 
 struct Queue;
 struct QueueFamily;

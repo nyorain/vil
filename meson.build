@@ -232,6 +232,7 @@ src = files(
 	'src/queue.cpp',
 	'src/submit.cpp',
 	'src/accelStruct.cpp',
+	'src/gencmd.cpp',
 
 	# gui stuff
 	'src/gui/render.cpp',

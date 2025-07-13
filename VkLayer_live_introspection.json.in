@@ -4,7 +4,7 @@
     "name": "VK_LAYER_live_introspection",
     "type": "GLOBAL",
     "library_path": "@lib_path@",
-    "api_version": "1.2.162",
+    "api_version": "1.4.313",
     "implementation_version": "@vil_version@",
     "description": "Vulkan Live Introspection & Debugging gui layer",
     "instance_extensions": [

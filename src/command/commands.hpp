@@ -143,9 +143,38 @@ enum class CommandType : u32 {
 	setColorWriteEnable,
 	bindShaders,
 	setDepthClampRange,
+
+	// VK_EXT_mesh_shader
 	drawMeshTasks,
 	drawMeshTasksIndirect,
 	drawMeshTasksIndirectCount,
+
+	// VK_EXT_device_generated_commands
+	executeGeneratedCommands,
+	preprocessGeneratedCommands,
+
+	// VK_EXT_device_generated_commands
+	setDepthClampEnable,
+	setPolygonMode,
+	setRasterizationSamples,
+	setSampleMask,
+	setAlphaToCoverageEnable,
+	setAlphaToOneEnable,
+	setLogicOpEnable,
+	setColorBlendEnable,
+	setColorBlendEquation,
+	setColorWriteMask,
+	setTessellationDomainOrigin,
+	setRasterizationStream,
+	setConservativeRasterizationMode,
+	setExtraPrimitiveOverestimationSize,
+	setDepthClipEnable,
+	setSampleLocationsEnable,
+	setColorBlendAdvanced,
+	setProvokingVertexMode,
+	setLineRasterizationMode,
+	setLineStippleEnable,
+	setDepthClipNegativeOneToOneEXT,
 
 	count,
 };
@@ -1550,6 +1579,215 @@ struct SetDepthClampRangeCmd final : CmdDerive<Command, CommandType::setDepthCla
 	Category category() const override { return Category::bind; }
 };
 
+// VK_EXT_device_generated_commands
+// VkGeneratedCommandsInfoEXT, unwrapped
+struct GeneratedCommandsInfo {
+	VkShaderStageFlags stages {};
+	IndirectExecutionSet* execSet {};
+	IndirectCommandsLayout* layout {};
+	VkDeviceAddress indirectAddress {};
+	VkDeviceSize indirectSize {};
+	VkDeviceAddress preprocessAddress {};
+	VkDeviceSize preprocessSize {};
+	u32 maxSequenceCount {};
+	VkDeviceAddress sequenceCountAddress {};
+	u32 maxDrawCount {};
+};
+
+// TODO: make this parent command?
+struct ExecuteGeneratedCommandsCmd final : CmdDerive<Command, CommandType::executeGeneratedCommands> {
+	bool isPreprocessed {};
+	GeneratedCommandsInfo info {};
+
+	std::string_view nameDesc() const override { return "ExecuteGeneratedCommands"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::other; }
+};
+
+struct PreprocessGeneratedCommandsCmd final : CmdDerive<Command, CommandType::preprocessGeneratedCommands> {
+	GeneratedCommandsInfo info {};
+	CommandBuffer* state {};
+
+	std::string_view nameDesc() const override { return "PreprocessGeneratedCommands"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::other; }
+};
+
+// VK_EXT_extended_dynamic_state3
+struct SetDepthClampEnableCmd final : CmdDerive<Command, CommandType::setDepthClampEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetDepthClampEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetPolygonModeCmd final : CmdDerive<Command, CommandType::setPolygonMode> {
+	VkPolygonMode mode {};
+
+	std::string_view nameDesc() const override { return "SetPolygonMode"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetRasterizationSamplesCmd final : CmdDerive<Command, CommandType::setRasterizationSamples> {
+	VkSampleCountFlagBits samples {};
+
+	std::string_view nameDesc() const override { return "SetRasterizationSamples"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetSampleMaskCmd final : CmdDerive<Command, CommandType::setSampleMask> {
+	VkSampleCountFlagBits samples {};
+	span<VkSampleMask> sampleMask;
+
+	std::string_view nameDesc() const override { return "SetSampleMask"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetAlphaToCoverageEnableCmd final : CmdDerive<Command, CommandType::setAlphaToCoverageEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetAlphaToCoverageEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetAlphaToOneEnableCmd final : CmdDerive<Command, CommandType::setAlphaToOneEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetAlphaToOneEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetLogicOpEnableCmd final : CmdDerive<Command, CommandType::setLogicOpEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetLogicOpEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetColorBlendEnableCmd final : CmdDerive<Command, CommandType::setColorBlendEnable> {
+	u32 firstAttachment {};
+	span<VkBool32> enable;
+
+	std::string_view nameDesc() const override { return "SetColorBlendEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetColorBlendEquationCmd final : CmdDerive<Command, CommandType::setColorBlendEquation> {
+	u32 firstAttachment {};
+	span<VkColorBlendEquationEXT> equations;
+
+	std::string_view nameDesc() const override { return "SetColorBlendEquation"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetColorWriteMaskCmd final : CmdDerive<Command, CommandType::setColorWriteMask> {
+	u32 firstAttachment {};
+	span<VkColorComponentFlags> colorWriteMasks;
+
+	std::string_view nameDesc() const override { return "SetColorWriteMask"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetTessellationDomainOriginCmd final : CmdDerive<Command, CommandType::setTessellationDomainOrigin> {
+	VkTessellationDomainOrigin domainOrigin;
+
+	std::string_view nameDesc() const override { return "SetTessellationDomainOrigin"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetRasterizationStreamCmd final : CmdDerive<Command, CommandType::setRasterizationStream> {
+	u32 rasterizationStream {};
+
+	std::string_view nameDesc() const override { return "SetRasterizationStream"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetConservativeRasterizationModeCmd final : CmdDerive<Command, CommandType::setConservativeRasterizationMode> {
+	VkConservativeRasterizationModeEXT mode {};
+
+	std::string_view nameDesc() const override { return "SetConservativeRasterizationMode"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetExtraPrimitiveOverestimationSizeCmd final : CmdDerive<Command, CommandType::setExtraPrimitiveOverestimationSize> {
+	float extraPrimitiveOverestimationSize {};
+
+	std::string_view nameDesc() const override { return "SetExtraPrimitiveOverestimationSize"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetDepthClipEnableCmd final : CmdDerive<Command, CommandType::setDepthClipEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetDepthClipEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetSampleLocationsEnableCmd final : CmdDerive<Command, CommandType::setSampleLocationsEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetSampleLocationsEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetColorBlendAdvancedCmd final : CmdDerive<Command, CommandType::setColorBlendAdvanced> {
+	u32 firstAttachment {};
+	span<VkColorBlendAdvancedEXT> blend;
+
+	std::string_view nameDesc() const override { return "SetColorBlendAdvanced"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetProvokingVertexModeCmd final : CmdDerive<Command, CommandType::setProvokingVertexMode> {
+	VkProvokingVertexModeEXT mode {};
+
+	std::string_view nameDesc() const override { return "SetProvokingVertexMode"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetLineRasterizationModeCmd final : CmdDerive<Command, CommandType::setLineRasterizationMode> {
+	VkLineRasterizationModeEXT mode {};
+
+	std::string_view nameDesc() const override { return "SetLineRasterizationMode"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetLineStippleEnableCmd final : CmdDerive<Command, CommandType::setLineStippleEnable> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetLineStippleEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetDepthClipNegativeOneToOneEXTCmd final : CmdDerive<Command, CommandType::setDepthClipNegativeOneToOneEXT> {
+	bool enable {};
+
+	std::string_view nameDesc() const override { return "SetDepthClipNegativeOneToOneEXT"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+
 // F: overloaded function type of signature void(<Command Types>*)
 // Will call f with cmd casted to the type indicated by cmdType.
 // Can be used to implement the visitor pattern, as the overloaded function
@@ -1657,6 +1895,29 @@ auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	case CT::drawMeshTasks: return f(static_cast<DrawMeshTasksCmd*>(cmd));
 	case CT::drawMeshTasksIndirect: return f(static_cast<DrawMeshTasksIndirectCmd*>(cmd));
 	case CT::drawMeshTasksIndirectCount: return f(static_cast<DrawMeshTasksIndirectCountCmd*>(cmd));
+	case CT::executeGeneratedCommands: return f(static_cast<ExecuteGeneratedCommandsCmd*>(cmd));
+	case CT::preprocessGeneratedCommands: return f(static_cast<PreprocessGeneratedCommandsCmd*>(cmd));
+	case CT::setDepthClampEnable: return f(static_cast<SetDepthClampEnableCmd*>(cmd));
+	case CT::setPolygonMode: return f(static_cast<SetPolygonModeCmd*>(cmd));
+	case CT::setRasterizationSamples: return f(static_cast<SetRasterizationSamplesCmd*>(cmd));
+	case CT::setSampleMask: return f(static_cast<SetSampleMaskCmd*>(cmd));
+	case CT::setAlphaToCoverageEnable: return f(static_cast<SetAlphaToCoverageEnableCmd*>(cmd));
+	case CT::setAlphaToOneEnable: return f(static_cast<SetAlphaToOneEnableCmd*>(cmd));
+	case CT::setLogicOpEnable: return f(static_cast<SetLogicOpEnableCmd*>(cmd));
+	case CT::setColorBlendEnable: return f(static_cast<SetColorBlendEnableCmd*>(cmd));
+	case CT::setColorBlendEquation: return f(static_cast<SetColorBlendEquationCmd*>(cmd));
+	case CT::setColorWriteMask: return f(static_cast<SetColorWriteMaskCmd*>(cmd));
+	case CT::setTessellationDomainOrigin: return f(static_cast<SetTessellationDomainOriginCmd*>(cmd));
+	case CT::setRasterizationStream: return f(static_cast<SetRasterizationStreamCmd*>(cmd));
+	case CT::setConservativeRasterizationMode: return f(static_cast<SetConservativeRasterizationModeCmd*>(cmd));
+	case CT::setExtraPrimitiveOverestimationSize: return f(static_cast<SetExtraPrimitiveOverestimationSizeCmd*>(cmd));
+	case CT::setDepthClipEnable: return f(static_cast<SetDepthClipEnableCmd*>(cmd));
+	case CT::setSampleLocationsEnable: return f(static_cast<SetSampleLocationsEnableCmd*>(cmd));
+	case CT::setColorBlendAdvanced: return f(static_cast<SetColorBlendAdvancedCmd*>(cmd));
+	case CT::setProvokingVertexMode: return f(static_cast<SetProvokingVertexModeCmd*>(cmd));
+	case CT::setLineRasterizationMode: return f(static_cast<SetLineRasterizationModeCmd*>(cmd));
+	case CT::setLineStippleEnable: return f(static_cast<SetLineStippleEnableCmd*>(cmd));
+	case CT::setDepthClipNegativeOneToOneEXT: return f(static_cast<SetDepthClipNegativeOneToOneEXTCmd*>(cmd));
 	case CT::count:
 		dlg_error("Invalid command type");
 	// NOTE: no default case by design so that we get compiler warnings about

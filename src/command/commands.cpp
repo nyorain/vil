@@ -12,6 +12,7 @@
 #include <queryPool.hpp>
 #include <rp.hpp>
 #include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <threadContext.hpp>
 #include <nytl/span.hpp>
 #include <util/util.hpp>
@@ -1866,39 +1867,39 @@ void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 
 // VK_EXT_extended_dynamic_state
 void SetCullModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetCullModeEXT(cb, cullMode);
+	dev.dispatch.CmdSetCullMode(cb, cullMode);
 }
 
 void SetFrontFaceCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetFrontFaceEXT(cb, frontFace);
+	dev.dispatch.CmdSetFrontFace(cb, frontFace);
 }
 
 void SetPrimitiveTopologyCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetPrimitiveTopologyEXT(cb, topology);
+	dev.dispatch.CmdSetPrimitiveTopology(cb, topology);
 }
 
 void SetViewportWithCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetViewportWithCountEXT(cb, viewports.size(), viewports.data());
+	dev.dispatch.CmdSetViewportWithCount(cb, viewports.size(), viewports.data());
 }
 
 void SetScissorWithCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetScissorWithCountEXT(cb, scissors.size(), scissors.data());
+	dev.dispatch.CmdSetScissorWithCount(cb, scissors.size(), scissors.data());
 }
 
 void SetDepthTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetDepthTestEnableEXT(cb, enable);
+	dev.dispatch.CmdSetDepthTestEnable(cb, enable);
 }
 
 void SetDepthWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetDepthWriteEnableEXT(cb, enable);
+	dev.dispatch.CmdSetDepthWriteEnable(cb, enable);
 }
 
 void SetDepthCompareOpCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, op);
+	dev.dispatch.CmdSetDepthCompareOp(cb, op);
 }
 
 void SetDepthBoundsTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, enable);
+	dev.dispatch.CmdSetDepthBoundsTestEnable(cb, enable);
 }
 
 void SetStencilTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
@@ -2163,6 +2164,130 @@ void SetDepthClampRangeCmd::record(const Device& dev, VkCommandBuffer cb, u32) c
 	dev.dispatch.CmdSetDepthClampRangeEXT(cb, mode, &range);
 }
 
+// VK_EXT_device_generated_commands
+VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info) {
+	VkGeneratedCommandsInfoEXT fwd {};
+	fwd.sType = VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT;
+	fwd.indirectCommandsLayout = info.layout->handle;
+	fwd.indirectExecutionSet = info.execSet->handle;
+	fwd.indirectAddress = info.indirectAddress;
+	fwd.indirectAddressSize = info.indirectSize;
+	fwd.preprocessAddress = info.preprocessAddress;
+	fwd.preprocessSize = info.preprocessSize;
+	fwd.maxDrawCount = info.maxDrawCount;
+	fwd.shaderStages = info.stages;
+	fwd.maxSequenceCount = info.maxSequenceCount;
+	fwd.sequenceCountAddress = info.sequenceCountAddress;
+
+	return fwd;
+}
+
+void ExecuteGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	auto fwd = convert(this->info);
+	dev.dispatch.CmdExecuteGeneratedCommandsEXT(cb, isPreprocessed, &fwd);
+}
+
+void PreprocessGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	auto fwd = convert(this->info);
+	// TODO: this is a potential crash! the application is only required to
+	// keep the 'state' commandBuffer alive while recording, not for submission.
+	// We cannot rely on this being alive here when recording later on in hook.
+	// idea:
+	// - keep the handle alive (ugly)
+	// - make this a no-op and always pass true in ExecuteGeneratedCommands? (ugly)
+	dev.dispatch.CmdPreprocessGeneratedCommandsEXT(cb, &fwd, state->handle);
+}
+
+// VK_EXT_extended_dynamic_state3
+void SetDepthClampEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetDepthClampEnableEXT(cb, enable);
+}
+
+void SetPolygonModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetPolygonModeEXT(cb, mode);
+}
+
+void SetRasterizationSamplesCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetRasterizationSamplesEXT(cb, samples);
+}
+
+void SetSampleMaskCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetSampleMaskEXT(cb, samples, sampleMask.data());
+}
+
+void SetAlphaToCoverageEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetAlphaToCoverageEnableEXT(cb, enable);
+}
+
+void SetAlphaToOneEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetAlphaToCoverageEnableEXT(cb, enable);
+}
+
+void SetLogicOpEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetAlphaToOneEnableEXT(cb, enable);
+}
+
+void SetColorBlendEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetColorBlendEnableEXT(cb, firstAttachment, enable.size(),
+		enable.data());
+}
+
+void SetColorBlendEquationCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetColorBlendEquationEXT(cb, firstAttachment, equations.size(),
+		equations.data());
+}
+
+void SetColorWriteMaskCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetColorWriteMaskEXT(cb, firstAttachment, colorWriteMasks.size(),
+		colorWriteMasks.data());
+}
+
+void SetTessellationDomainOriginCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetTessellationDomainOriginEXT(cb, domainOrigin);
+}
+
+void SetRasterizationStreamCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetRasterizationStreamEXT(cb, rasterizationStream);
+}
+
+void SetConservativeRasterizationModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetConservativeRasterizationModeEXT(cb, mode);
+}
+
+void SetExtraPrimitiveOverestimationSizeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetExtraPrimitiveOverestimationSizeEXT(cb, extraPrimitiveOverestimationSize);
+}
+
+void SetDepthClipEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetDepthClipEnableEXT(cb, enable);
+}
+
+void SetSampleLocationsEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetSampleLocationsEnableEXT(cb, enable);
+}
+
+void SetColorBlendAdvancedCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetColorBlendAdvancedEXT(cb, firstAttachment, blend.size(),
+		blend.data());
+}
+
+void SetProvokingVertexModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetProvokingVertexModeEXT(cb, mode);
+}
+
+void SetLineRasterizationModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetLineRasterizationModeEXT(cb, mode);
+}
+
+void SetLineStippleEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetLineStippleEnableEXT(cb, enable);
+}
+
+void SetDepthClipNegativeOneToOneEXTCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdSetDepthClipNegativeOneToOneEXT(cb, enable);
+}
+
+// util
 bool isIndirect(const Command& cmd) {
 	return
 		cmd.type() == CommandType::drawIndirect ||
