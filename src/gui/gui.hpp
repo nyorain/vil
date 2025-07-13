@@ -81,7 +81,6 @@ public:
 		VkPipeline histogramRender {};
 	};
 
-	bool unfocus {false};
 	Mode mode_ {Mode::normal};
 
 	ImFont* defaultFont {};

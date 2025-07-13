@@ -1259,17 +1259,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		ImGui::PushStyleColor(ImGuiCol_Border, col);
 	}
 
-	// TODO: needed?
-	// if(this->focused) {
-	// 	ImGui::SetNextWindowFocus();
-	// } else {
-	// 	ImGui::SetWindowFocus(nullptr);
-	// }
-	if(this->unfocus) {
-		ImGui::SetWindowFocus(nullptr);
-		this->unfocus = false;
-	}
-
 	if(activeTab_ != Tab::commandBuffer) {
 		// deactivate hook when we aren't in the commandbuffer tab
 		dev().commandHook->freeze.store(true);
