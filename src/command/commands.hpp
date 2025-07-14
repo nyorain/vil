@@ -1479,6 +1479,7 @@ struct TraceRaysCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRays> 
 	std::string_view nameDesc() const override { return "TraceRays"; }
 	std::string toString() const override;
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct TraceRaysIndirectCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRaysIndirect> {

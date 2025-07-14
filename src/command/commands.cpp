@@ -879,7 +879,7 @@ std::string DrawMultiCmd::toString() const {
 }
 void DrawMultiCmd::displayInspector(Gui& gui) const {
 	// TODO
-	DrawCmdBase::displayInspector(gui);
+	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 void DrawMultiCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto ourStride = sizeof(VkMultiDrawInfoEXT);
@@ -893,7 +893,7 @@ std::string DrawMultiIndexedCmd::toString() const {
 }
 void DrawMultiIndexedCmd::displayInspector(Gui& gui) const {
 	// TODO
-	DrawCmdBase::displayInspector(gui);
+	DrawCmdBase::displayGrahpicsState(gui, true);
 }
 void DrawMultiIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto ourStride = sizeof(VkMultiDrawIndexedInfoEXT);
@@ -2039,6 +2039,16 @@ void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 
 std::string TraceRaysCmd::toString() const {
 	return dlg::format("TraceRays({}, {}, {})", width, height, depth);
+}
+
+void TraceRaysCmd::displayInspector(Gui& gui) const {
+	asColumns2({{
+		{"width", "{}", width},
+		{"height", "{}", height},
+		{"depth", "{}", depth},
+	}});
+
+	refButtonD(gui, state->pipe);
 }
 
 void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {

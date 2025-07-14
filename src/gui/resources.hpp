@@ -38,8 +38,9 @@ private:
 	void drawDesc(Draw&, DescriptorPool&);
 	void drawDesc(Draw&, DescriptorSetLayout&);
 	void drawDesc(Draw&, Pipeline&);
-	void drawDesc(Draw&, GraphicsPipeline&);
-	void drawDesc(Draw&, ComputePipeline&);
+	void drawDescPipe(Draw&, GraphicsPipeline&);
+	void drawDescPipe(Draw&, ComputePipeline&);
+	void drawDescPipe(Draw&, RayTracingPipeline&);
 	void drawDesc(Draw&, PipelineLayout&);
 	void drawDesc(Draw&, DeviceMemory&);
 	void drawDesc(Draw&, CommandPool&);

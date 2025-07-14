@@ -676,10 +676,8 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 	}
 }
 
-void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
-	// references: layout & renderPass
-	refButtonExpect(*gui_, pipe.layout.get());
-
+void ResourceGui::drawDescPipe(Draw&, GraphicsPipeline& pipe) {
+	// references: renderPass
 	refButtonExpect(*gui_, pipe.renderPass.get());
 	ImGui::SameLine();
 	ImGui::Text("Subpass %d", pipe.subpass);
@@ -895,6 +893,8 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	// TODO: tesselation
 }
 
+// TODO: draw specialization info for stages
+
 void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
 	auto& dev = gui_->dev();
 	if(contains(dev.allExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
@@ -925,10 +925,49 @@ void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
 	}
 }
 
-void ResourceGui::drawDesc(Draw&, ComputePipeline& pipe) {
-	ImGui::Text("TODO");
-
+void ResourceGui::drawDescPipe(Draw&, ComputePipeline& pipe) {
 	drawShaderInfo(pipe.handle, VK_SHADER_STAGE_COMPUTE_BIT);
+}
+
+void ResourceGui::drawDescPipe(Draw&, RayTracingPipeline& pipe) {
+	imGuiText("Max recursion depth: {}", pipe.maxPipelineRayRecursionDepth);
+
+	if(ImGui::CollapsingHeader("Stages")) {
+		for(auto [i, stage] : enumerate(pipe.stages)) {
+			ImGui::PushID(i);
+
+			auto str = dlg::format("{}: {}", vk::name(stage.stage), stage.entryPoint);
+			ImGui::Text("%d: %s", int(i), str.c_str());
+			ImGui::PopID();
+		}
+	}
+
+	if(ImGui::CollapsingHeader("Groups")) {
+		for(auto [i, group] : enumerate(pipe.groups)) {
+			ImGui::PushID(i);
+
+			std::string str;
+			if(group.type == VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR) {
+				str = dlg::format("{}: {}", vk::name(group.type), group.general);
+			} else {
+				str = dlg::format("{}: ahs {}, chs {}, is {}", vk::name(group.type),
+					group.closestHit, group.anyHit, group.intersection);
+			}
+
+			ImGui::BulletText("%s", str.c_str());
+			ImGui::PopID();
+		}
+	}
+
+	if(ImGui::CollapsingHeader("Dynamic state")) {
+		for(auto& dynState : pipe.dynamicState) {
+			ImGui::BulletText("%s", vk::name(dynState));
+		}
+
+		if(pipe.dynamicState.empty()) {
+			ImGui::Text("None");
+		}
+	}
 }
 
 void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
@@ -1347,12 +1386,17 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 }
 
 void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
+	refButtonExpect(*gui_, pipe.layout.get());
+
 	switch(pipe.type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
-			drawDesc(draw, static_cast<GraphicsPipeline&>(pipe));
+			drawDescPipe(draw, static_cast<GraphicsPipeline&>(pipe));
 			return;
 		case VK_PIPELINE_BIND_POINT_COMPUTE:
-			drawDesc(draw, static_cast<ComputePipeline&>(pipe));
+			drawDescPipe(draw, static_cast<ComputePipeline&>(pipe));
+			return;
+		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+			drawDescPipe(draw, static_cast<RayTracingPipeline&>(pipe));
 			return;
 		default:
 			dlg_warn("Unimplemented pipeline bind point");
