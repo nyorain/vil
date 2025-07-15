@@ -1537,9 +1537,10 @@ struct BeginRenderingCmd final : CmdDerive<RenderSectionCommand, CommandType::be
 	// TODO: toString?
 };
 
-struct EndRenderingCmd final : CmdDerive<SectionCommand, CommandType::endRendering> {
+struct EndRenderingCmd final : CmdDerive<Command, CommandType::endRendering> {
 	std::string_view nameDesc() const override { return "EndRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::end; }
 };
 
 // VK_EXT_vertex_input_dynamic_state

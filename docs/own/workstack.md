@@ -1,4 +1,10 @@
+- [ ] fix invalid pipeline barrier with BeginRendering (test e.g. with iro gpuDebugDraw)
 - [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
+
+- [ ] Format weird for (RW)ByteAddressBuffers in hlsl/slang
+	- [ ] in that case, allow to explicitly specify the format to be printed.
+	- [ ] factor out entire buffmt lib into separate project?
+	      would make a cool imgui binary format reader.
 
 - [ ] properly set shaders via CmdSetShadersEXT in ComputeState/GraphicsState
       We rely on a pipeline being there in many places.
