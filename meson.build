@@ -156,18 +156,11 @@ endif
 # deps
 dep_threads = dependency('threads', required: false)
 
-dep_dlg = dependency('dlg',
-	static: true,
-	fallback: ['dlg', 'dlg_dep'])
-dep_nytl = dependency('nytl',
-	fallback: ['nytl', 'nytl_dep'])
-dep_imgio = dependency('imgio',
-	static: true,
-	default_options: ['png=false'],
-	fallback: ['imgio', 'imgio_dep'])
-dep_spc = dependency('spc',
-	fallback: ['spc', 'spc_dep'],
-	static: true)
+dopts = ['default_library=static']
+dep_dlg = subproject('dlg', default_options: dopts).get_variable('dlg_dep')
+dep_nytl = subproject('nytl', default_options: dopts).get_variable('nytl_dep')
+dep_imgio = subproject('imgio', default_options: dopts).get_variable('imgio_dep')
+dep_spc = subproject('spc', default_options: dopts).get_variable('spc_dep')
 
 layer_args += '-DDLG_DEFAULT_TAGS="vil"'
 
