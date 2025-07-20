@@ -541,6 +541,8 @@ vil_layer = shared_library(
 	cpp_pch: pch,
 )
 
+install_headers('include/vil_api.h')
+
 conf_data = configuration_data()
 conf_data.set('vil_version', meson.project_version())
 
@@ -565,7 +567,8 @@ configure_file(
 	output: 'VkLayer_live_introspection.json',
 	install: true,
 	install_dir: join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
-	configuration: conf_data
+	configuration: conf_data,
+	install_tag: 'runtime',
 )
 
 if build_machine.system() == 'windows'
@@ -586,6 +589,7 @@ if with_unit_tests
 	# executor for embedded unit tests
 	viltest = executable('viltest', files('src/test/unit/main.cpp'),
 		include_directories: inc,
+		install_tag: 'tests',
 		cpp_args: args,
 		dependencies: [],
 		link_with: vil_layer)
@@ -613,6 +617,7 @@ if with_integration_tests
 
 	intest = executable('intest', int_src,
 		include_directories: inc,
+		install_tag: 'tests',
 		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl, dep_nytl])
 	test('intest', intest,
@@ -623,6 +628,7 @@ endif
 if with_standalone
 	iv = executable('iv', files('src/standalone/main.cpp'),
 		include_directories: inc,
+		install_tag: 'bin-devel',
 		cpp_args: args,
 		dependencies: [],
 		link_with: vil_layer)
