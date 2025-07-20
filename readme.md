@@ -17,7 +17,7 @@ Features:
 	- show all state bound for a draw/dispatch command and all outputs, live
 		- display images
 		- show and interpret buffer content
-		- show vertex input (vertex output, model visualization and 
+		- show vertex input (vertex output, model visualization and
 		  other pre-rasterization stages are WIP)
 		- show the contents of framebuffer attachments after a draw call
 	- debug shaders, seeing the variables update live (WIP)
@@ -27,7 +27,7 @@ Features:
 	- overall statistics on used memory and available memory budget
 
 This is still in an early stage of development, bug reports and feedback welcome.
-See the [rough overview](docs/features.md) over the currently implemented vulkan 
+See the [rough overview](docs/features.md) over the currently implemented vulkan
 commands/extensions. Keep in mind that using extensions/features not supported
 by the layer at the moment might cause crashes.
 
@@ -90,10 +90,10 @@ meson build
 ninja -C build
 ```
 
-To install the layer you can just run `ninja -C build install` (you might need superuser rights for that).
+To install the layer you can just run `meson install --tags runtime` (you might need superuser rights for that).
 By default, meson will install to `/usr/local` so - depending on your system - the layer configuration file or
 layer library itself might not be found by the vulkan loader. Either make sure that `/usr/local` is properly
-included in your system's library and vulkan loader search paths or change the install prefix to `/usr` 
+included in your system's library and vulkan loader search paths or change the install prefix to `/usr`
 via meson (e.g. run `meson --prefix=/usr build` in the beginning).
 Be warned that using the `/usr` prefix for manually built libs/applications is generally not recommended since it might mess
 with your package manager.
@@ -156,14 +156,14 @@ There are multiple reasons for this:
   and while the driver can handle it, the layer cannot.
 - Using this layer in games might trigger anti-cheat mechanisms.
   Using this layer in multiplayer games might get you banned.
-  Even just playing games that include a multiplayer mode locally with the 
+  Even just playing games that include a multiplayer mode locally with the
   layer might get you in trouble. Just don't do it.
 - Usage of this layer in retail products might be motivated by abuse.
   Keep in mind that while game developers usually have no problem with
   players sharing videos or screenshots of the gameplay; extracting
   textures, models, raw framebuffer data or rendering techniques from the game
   (and then distributing them) might not be in the interest of the developer
-  or fair use of the material. This is not the usecase this layer 
+  or fair use of the material. This is not the usecase this layer
   is intended for and not a usecase that will be supported in any way.
 
 With that out of the way, there is nothing per se wrong with using the
@@ -179,9 +179,9 @@ be accepted.
 
 SPDX-License-Identifier: GPL-3.0-only
 
-Unless stated otherwise, code and assets in this repository are licensed under 
+Unless stated otherwise, code and assets in this repository are licensed under
 GPLv3. Contributors [don't have to sign a CLA](https://drewdevault.com/2018/10/05/Dont-sign-a-CLA.html).
 
-Note that since this is a dynamically loaded vulkan layer and not a library 
-you link your application against, using this in production of proprietary 
+Note that since this is a dynamically loaded vulkan layer and not a library
+you link your application against, using this in production of proprietary
 products should not be a problem and is inside the intended usecase.
