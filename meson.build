@@ -69,9 +69,6 @@ args = cc.get_supported_arguments([
 	'/wd4201', # nameless struct/union
 	'-D_CRT_SECURE_NO_WARNINGS',
 
-	# msvc really slow in debug build without this
-	#'-D_ITERATOR_DEBUG_LEVEL=0',
-
 	# NOTE: this is super useful to optimize compile times, with clang
 	# See https://www.phoronix.com/news/LLVM-Clang-9.0-Time-Trace
 	# View e.g. via ui.perfetto.dev. The trace files will be in the build dir,
@@ -98,7 +95,12 @@ args += [
 
 if get_option('buildtype') == 'debug'
 	# highly useful for debugging but has impact on performance
-	args += '-D_GLIBCXX_DEBUG'
+	# Important that it's a global argument, spc has c++ stuff
+	# in its headers/API
+	add_global_arguments('-D_GLIBCXX_DEBUG', language: 'cpp')
+
+	# msvc really slow in debug build without this
+	#'-D_ITERATOR_DEBUG_LEVEL=0',
 endif
 
 # TODO: yeah, this needs some love
@@ -389,14 +391,13 @@ dep_swa = []
 # also, even with overlay, we shouldn't pull swa as dependency.
 # shold probably just copy the key_to_winapi function
 if with_window or with_x11_hook or with_win32 or with_example
-	dep_swa = dependency('swa',
-		fallback: ['swa', 'swa_dep'],
-		static: true,
+	dep_swa = subproject('swa',
 		default_options: [
+			'default_library=static',
 			'with-gl=disabled',
 			'link-vulkan=false',
 			'with-kms=disabled'
-		])
+		]).get_variable('swa_dep')
 
 	if with_window or with_x11_hook or with_win32
 		deps += dep_swa

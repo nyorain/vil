@@ -246,7 +246,8 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 	}
 
 	if(spirv[0] != 0x07230203) {
-		dlg_error("Invalid spirv magic number. Endianess troubles?");
+		dlg_error("Invalid spirv magic number ({}{}). Endianess troubles?",
+			std::hex, spirv[0]);
 		return {};
 	}
 
