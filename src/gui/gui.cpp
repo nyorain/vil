@@ -1948,8 +1948,9 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		for(auto& draw : draws_) {
 			// needed to avoid VUID-vkQueueSubmit-pSignalSemaphores-00067:
 			// even though the submission of the draw has finished, it might
-			// not have been unsignaled by presentation yet.
-			if(draw->lastImageID == info.imageIdx) {
+			// not have been unsignaled by presentation yet. We can only
+			// know this when the imageIDs are the same.
+			if(draw->lastImageID != info.imageIdx) {
 				continue;
 			}
 

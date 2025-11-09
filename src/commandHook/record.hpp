@@ -14,9 +14,8 @@ struct ShaderCaptureHook;
 // Internal representation of a hooked recording of a CommandRecord.
 // Is kept alive only as long as the associated Record is referencing this
 // (since it might resubmitted again, making this useful) or there are
-// pending submission. When the record is invalidated, it no longer references
-// the record.
-// Since the record must stay alive and valid until all submissions have
+// pending submission.
+// Since the hooked record must stay alive and valid until all submissions have
 // completed, we can assume the Record this hook was created for remains
 // valid throughout its lifetime.
 struct CommandHookRecord {
@@ -33,6 +32,7 @@ struct CommandHookRecord {
 	// When there is currently a (hook) submission using this record,
 	// it is stored here. Synchronized via device mutex.
 	Submission* writer {};
+	std::atomic<u32> refCount {};
 
 	// When copying state from a descriptor set, this will hold the pointer
 	// to the associated descriptor set state. Used for updateAfterBind
@@ -110,10 +110,6 @@ struct CommandHookRecord {
 	static constexpr auto maxDebugTimings = 10u;
 	VIL_DEBUG_ONLY(std::vector<std::string> ownTimingNames;)
 
-	// Linked list of all records belonging to this->hook
-	CommandHookRecord* next {};
-	CommandHookRecord* prev {};
-
 	// application handles that we use in inserted GPU commands that might
 	// be destroyed by the application. Mainly relevant for update_unused_while_pending descriptors.
 	std::vector<const Handle*> usedHandles;
@@ -151,11 +147,6 @@ public:
 		const CommandDescriptorSnapshot& descriptors,
 		const CommandHookOps& ops, LocalCapture* localCapture = nullptr);
 	~CommandHookRecord();
-
-	// Called when associated record is destroyed or hook replaced.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	void finish() noexcept;
 
 	// Returns whether this command has an associated hooked command.
 	// There are HookRecord that don't have an associated hooked command
@@ -245,6 +236,5 @@ private:
 	static constexpr auto timingBarrierBefore = true;
 	static constexpr auto timingBarrierAfter = true;
 };
-
 
 } // namespace vil

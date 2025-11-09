@@ -33,12 +33,6 @@ CommandHookRecord::CommandHookRecord(CommandHook& hook,
 	assertOwned(hook.dev_->mutex);
 
 	this->localCapture = xlocalCapture;
-	this->next = hook.records_;
-	if(hook.records_) {
-		hook.records_->prev = this;
-	}
-	hook.records_ = this;
-
 	hookCounter = hook.counter_;
 
 	auto& dev = *xrecord.dev;
@@ -113,15 +107,18 @@ CommandHookRecord::CommandHookRecord(CommandHook& hook,
 CommandHookRecord::~CommandHookRecord() {
 	ZoneScoped;
 
-	dlg_assert(DebugStats::get().aliveHookRecords > 0);
-	--DebugStats::get().aliveHookRecords;
-
 	// We can be sure that record is still alive here since when the
 	// record is destroyed, all its submissions must have finished as well.
 	// And then we would have been destroyed via the finish() command (see
 	// the assertions there)
 	dlg_assert(record);
 	dlg_assert(!writer);
+	dlg_assert(invalid);
+	dlg_assert(!contains(record->hookRecords, this));
+	dlg_assert(!contains(commandHook().records_, this));
+
+	dlg_assert(DebugStats::get().aliveHookRecords > 0);
+	--DebugStats::get().aliveHookRecords;
 
 	auto& dev = *record->dev;
 
@@ -152,20 +149,6 @@ CommandHookRecord::~CommandHookRecord() {
 	dev.dispatch.DestroyRenderPass(dev.handle, rp0, nullptr);
 	dev.dispatch.DestroyRenderPass(dev.handle, rp1, nullptr);
 	dev.dispatch.DestroyRenderPass(dev.handle, rp2, nullptr);
-
-	// unlink
-	if(next) {
-		next->prev = prev;
-	}
-	if(prev) {
-		prev->next = next;
-	}
-
-	auto& hook = commandHook();
-	if(this == hook.records_) {
-		dlg_assert(!prev);
-		hook.records_ = next;
-	}
 }
 
 CommandHook& CommandHookRecord::commandHook() const {
@@ -2152,23 +2135,6 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {
 	// TODO: implement indirect copy concept
 	(void) cmd;
 	dlg_error("TODO: implement support for copying BuildAccelStructsIndirectCmd data");
-}
-
-void CommandHookRecord::finish() noexcept {
-	// NOTE: We don't do this since we can assume the record to remain
-	// valid until all submissions are finished. We can assume it to
-	// be valid throughout the entire lifetime of *this.
-	// record = nullptr;
-
-	// Keep alive when there still a pending submission.
-	// It will delete this record then instead.
-	if(!writer) {
-		delete this;
-	} else {
-		// The only reason we might land here is when the record
-		// was invalidated.
-		dlg_assert(invalid);
-	}
 }
 
 } // namespace vil

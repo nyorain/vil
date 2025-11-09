@@ -156,12 +156,9 @@ template<typename T> struct WrappedHandle;
 
 template<typename T, typename H> class HandledPtr;
 template<typename T, typename Deleter = std::default_delete<T>> struct RefCountHandler;
-template<typename T> struct FinishHandler;
 
 template<typename T, typename D = std::default_delete<T>>
 using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
-
-template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
 using AccelStructStatePtr = IntrusivePtr<AccelStructState>;

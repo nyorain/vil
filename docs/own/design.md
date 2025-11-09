@@ -1276,3 +1276,27 @@ it via the dynamic usage mechanism as well). So, yeah, we can likely
 optimize this in some way later on. Maybe store in resources whether they
 were ever bound in a updateUnusedWhilePending slot or something.
 
+# Lifetime of a hooked record
+
+- Created only by CommandHook::hook
+	- inserted then into CommandHook list
+	- inserted into CommandRecord list
+- On CommandHook::invalidate:
+	- removed from its CommandRecord
+	- removed from CommandHook list
+		- this might destroy it, when it's not pending
+		- otherwise, invalid is set to true
+- On CommandRecord destruction:
+	- removes all its hooked versions from the CommandHook
+	- this might delete them, if they are not pending.
+- On HookedSubmission finish: deletes it if invalid
+
+The combination of the 'writer' and 'invalid' fields can
+be understood as ref counting. A HookedRecord can only be deleted if:
+`!writer && invalid` given that we set `invalid = true` when its record
+is destroyed. When `writes` or `invalid` are changed, the deletion
+check has to be done.
+
+We could probably extend this to even simpler handling for single-use
+records.
+

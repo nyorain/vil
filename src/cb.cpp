@@ -150,13 +150,13 @@ CommandBuffer::~CommandBuffer() {
 			dlg_assert(state_ == State::recording);
 			dlg_assert(builder_.record_->cb == this);
 			builder_.record_->cb = nullptr;
-			builder_.record_->hookRecords.clear();
+			clearHookRecordsLocked(*builder_.record_);
 		}
 
 		if(lastRecord_) {
 			dlg_assert(lastRecord_->cb == this || lastRecord_->cb == nullptr);
 			lastRecord_->cb = nullptr;
-			lastRecord_->hookRecords.clear();
+			clearHookRecordsLocked(*lastRecord_);
 		}
 	}
 }
@@ -205,7 +205,7 @@ void CommandBuffer::doReset(bool startRecord) {
 		if(builder_.record_) {
 			dlg_assert(state_ == State::recording);
 			builder_.record_->cb = nullptr;
-			builder_.record_->hookRecords.clear();
+			clearHookRecordsLocked(*builder_.record_);
 			keepAliveRecord = std::move(builder_.record_);
 		}
 
@@ -214,7 +214,7 @@ void CommandBuffer::doReset(bool startRecord) {
 		if(lastRecord_ && lastRecord_->cb) {
 			dlg_assert(lastRecord_->cb == this);
 			lastRecord_->cb = nullptr;
-			lastRecord_->hookRecords.clear();
+			clearHookRecordsLocked(*lastRecord_);
 
 			// we can't have an executable record *and* a recording one
 			dlg_assert(!keepAliveRecord);
@@ -330,7 +330,7 @@ void CommandBuffer::invalidateLocked() {
 
 	// Free the hook data (as soon as possible), it's no longer
 	// needed as this record will never be submitted again.
-	lastRecord_->hookRecords.clear();
+	clearHookRecordsLocked(*lastRecord_);
 	lastRecord_->cb = nullptr;
 
 	this->state_ = State::invalid;

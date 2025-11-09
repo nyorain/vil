@@ -241,7 +241,13 @@ public:
 
 	Hints& hintsLocked();
 	Ops& opsLocked();
+	Device& dev() const { return *dev_; }
 	void invalidateRecordingsLocked(bool forceAll = false);
+
+	// Removes references to hooked record and moves it to invalid state.
+	// Will delete the record if it's not pending. Reference must not be
+	// accessed after this call.
+	void removeRecordLocked(CommandHookRecord& record);
 
 private:
 	// Initializes the pipelines and data needed for acceleration
@@ -273,8 +279,8 @@ private:
 	Device* dev_ {};
 
 	u32 counter_ {0};
-	CommandHookRecord* records_ {}; // intrusive linked list
-									//
+	std::vector<CommandHookRecord*> records_; // all alive & valid hooked records
+
 	std::vector<CompletedHook> completed_;
 	Ops ops_;
 	Target target_;

@@ -25,8 +25,10 @@ CommandHookSubmission::~CommandHookSubmission() {
 		record->writer = nullptr;
 
 		if(record->invalid) {
-			record->writer = nullptr;
+			auto& hook = record->commandHook();
 			dlg_assert(!contains(record->record->hookRecords, record));
+			dlg_assert(!contains(hook.records_, record));
+			dlg_assert(!record->writer);
 			delete record;
 		}
 	}
@@ -71,13 +73,6 @@ void CommandHookSubmission::finish(Submission& subm) {
 	// destroyed.
 	if(record->invalid) {
 		finishAccelStructBuilds();
-
-		record->writer = nullptr;
-		dlg_assert(!contains(record->record->hookRecords, record));
-		delete record;
-
-		// unset for our destructor
-		record = nullptr;
 		return;
 	}
 

@@ -106,17 +106,28 @@ bool copyableDescriptorSame(DescriptorStateRef a, DescriptorStateRef b,
 	return false;
 }
 
+// Moves the state of 'rec' from valid to invalid and makes sure all variants
+// are still fulfilled. Might delete it, reference should not be accessed
+// afterwards!
 void invalidate(CommandHookRecord& rec) {
-	rec.invalid = true;
-	rec.prev = nullptr;
-	rec.next = nullptr;
-	auto it = find(rec.record->hookRecords, &rec);
-	dlg_assert(it != rec.record->hookRecords.end());
+	dlg_assert(!rec.invalid);
+	assertOwned(rec.commandHook().dev().mutex);
 
-	// CommandRecord::Hook is a FinishPtr.
-	// This will delete our record hook if there are no pending
-	// submissions of it left. See CommandHookRecord::finish
-	rec.record->hookRecords.erase(it);
+	rec.invalid = true;
+	if(rec.record) {
+		auto it = find(rec.record->hookRecords, &rec);
+
+		// the record should be listed in rec.record->hookRecords unless
+		// this is called by ~CommandRecord
+		dlg_assert(it != rec.record->hookRecords.end() || rec.refCount == 0u);
+		if(it != rec.record->hookRecords.end()) {
+			rec.record->hookRecords.erase(it);
+		}
+	}
+
+	if(!rec.writer) {
+		delete &rec;
+	}
 }
 
 // CommandHook
@@ -917,14 +928,14 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 					++completedCount;
 					if(!foundCompleted || foundCompletedIt > completedIt) {
 						foundCompletedIt = completedIt;
-						foundCompleted = hookRecord.get();
+						foundCompleted = hookRecord;
 					}
 				}
 
 				continue;
 			}
 
-			foundHookRecord = hookRecord.get();
+			foundHookRecord = hookRecord;
 			break;
 		}
 	}
@@ -968,7 +979,7 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		// buffer uses any update_after_bind descriptors that changed.
 		// We therefore compare them.
 		if(hookNeededForCmd && copiedDescriptorChanged(*foundHookRecord)) {
-			invalidate(*foundHookRecord);
+			removeRecordLocked(*foundHookRecord);
 			foundHookRecord = nullptr;
 		}
 	}
@@ -994,8 +1005,9 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		auto hook = new CommandHookRecord(*this, record,
 			{dstCommand.begin(), dstCommand.end()},
 			descriptors, *ops, localCapture);
+		records_.push_back(hook);
 		hook->match = dstCommandMatch;
-		record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
+		record.hookRecords.push_back(hook);
 
 		foundHookRecord = hook;
 	}
@@ -1044,23 +1056,27 @@ void CommandHook::invalidateRecordingsLocked(bool forceAll) {
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
 
-	// Destroy all past recordings as soon as possible
-	// (they might be kept alive by pending submissions)
-	auto* rec = records_;
-	while(rec) {
-		// important to store this before we potentially destroy rec.
-		auto* next = rec->next;
-
-		// we might not want to invalidate recordings that didn't hook a command
-		// and were only done for accelStruct builddata copying
-		if(forceAll || !rec->hcommand.empty()) {
-			invalidate(*rec);
+	for(auto it = records_.begin(); it != records_.end();) {
+		dlg_assert(*it);
+		auto& rec = **it;
+		if(forceAll || !rec.hcommand.empty()) {
+			it = records_.erase(it);
+			invalidate(rec);
+			continue;
 		}
 
-		rec = next;
+		++it;
+	}
+}
+
+void CommandHook::removeRecordLocked(CommandHookRecord& record) {
+	auto it = find(records_, &record);
+	dlg_assert(it != records_.end());
+	if(it != records_.end()) {
+		records_.erase(it);
 	}
 
-	records_ = nullptr;
+	invalidate(record);
 }
 
 CommandHookState::CommandHookState() {

@@ -368,7 +368,10 @@ struct CommandRecord {
 	std::atomic<u32> refCount {0};
 
 	// For CommandHook: can store hooked versions of this record here.
-	std::vector<FinishPtr<CommandHookRecord>> hookRecords;
+	// Only valid hook records are listed here. Synced via dev mutex.
+	// There may still be invalid hook-records associated with this alive
+	// when they are still in submission.
+	std::vector<CommandHookRecord*> hookRecords;
 
 	CommandRecord(CommandBuffer& cb);
 	explicit CommandRecord(ManualTag, Device* dev); // mainly for testing
@@ -377,6 +380,8 @@ struct CommandRecord {
 	CommandRecord(CommandRecord&&) noexcept = delete;
 	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
+
+void clearHookRecordsLocked(CommandRecord& record);
 
 // Checks if the given bound DescriptorSet is still valid.
 // If so, returns it (and a lock making sure it's kept alive).

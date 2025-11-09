@@ -2,6 +2,7 @@
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
 #include <commandHook/record.hpp>
+#include <commandHook/hook.hpp>
 #include <stats.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
@@ -32,6 +33,21 @@ void onRecordFree(const std::byte* buf, u32 size) {
 	(void) size;
 	TracyFreeS(buf, 8);
 	DebugStats::get().commandMem -= size;
+}
+
+void clearHookRecordsLocked(CommandRecord& rec) {
+	dlg_assert(rec.dev);
+	assertOwned(rec.dev->mutex);
+
+	ZoneScopedN("clear hookRecords");
+	auto moved = std::move(rec.hookRecords); // move to allow iteration
+	for(auto* record : moved) {
+		dlg_assert(!record->invalid);
+		dlg_assert(!record->writer); // wouldn't make sense
+		rec.dev->commandHook->removeRecordLocked(*record);
+	}
+
+	rec.hookRecords = {};
 }
 
 // Record
@@ -68,8 +84,9 @@ CommandRecord::~CommandRecord() {
 		// And it must be called while mutex is locked.
 		// TODO: don't require that
 		std::lock_guard lock(dev->mutex);
-		ZoneScopedN("clear hookRecords");
-		hookRecords.clear();
+		clearHookRecordsLocked(*this);
+	} else {
+		dlg_assert(hookRecords.empty());
 	}
 
 	dlg_assert(DebugStats::get().aliveRecords > 0);

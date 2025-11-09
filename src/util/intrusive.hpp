@@ -117,24 +117,6 @@ struct RefCountHandler {
 	void dec(T& obj) const noexcept { decRefCount<T, Deleter>(obj); }
 };
 
-template<typename T>
-struct FinishHandler {
-	FinishHandler() = default;
-
-	// Can't be copied; inc not possible
-	FinishHandler(const FinishHandler&) = delete;
-	FinishHandler& operator=(const FinishHandler&) = delete;
-
-	FinishHandler(FinishHandler&&) noexcept = default;
-	FinishHandler& operator=(FinishHandler&&) noexcept = default;
-
-	void inc(T&) const noexcept {}
-	void dec(T& obj) const noexcept {
-		static_assert(std::is_nothrow_invocable_v<decltype(&T::finish), T>);
-		obj.finish();
-	}
-};
-
 template<typename T, typename H>
 bool operator==(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {
 	return a.get() == b.get();
