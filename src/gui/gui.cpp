@@ -1605,136 +1605,139 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
-	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
 
-	ensureFontAtlas(draw.cb);
+	{
+		DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
 
-	this->draw(draw, info.fullscreen);
-	auto& drawData = *ImGui::GetDrawData();
-	this->uploadDraw(draw, drawData);
+		ensureFontAtlas(draw.cb);
 
-	auto blurred = false;
-	if(blur_.dev && !info.clear) {
-		auto& sc = dev().swapchains.get(info.swapchain);
-		if(sc.supportsSampling) {
-			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
-			blurred = true;
+		this->draw(draw, info.fullscreen);
+		auto& drawData = *ImGui::GetDrawData();
+		this->uploadDraw(draw, drawData);
+
+		auto blurred = false;
+		if(blur_.dev && !info.clear) {
+			auto& sc = dev().swapchains.get(info.swapchain);
+			if(sc.supportsSampling) {
+				vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
+				blurred = true;
+			}
 		}
+
+		for(auto& cb : preRender_) {
+			cb(draw);
+		}
+		preRender_.clear();
+
+		if(info.clear) {
+			VkImageMemoryBarrier dstBarrier[1] = {};
+			dstBarrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			dstBarrier[0].dstAccessMask =
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			dstBarrier[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			dstBarrier[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			dstBarrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstBarrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstBarrier[0].image = info.image;
+			dstBarrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			dstBarrier[0].subresourceRange.levelCount = 1;
+			dstBarrier[0].subresourceRange.layerCount = 1;
+			dev().dispatch.CmdPipelineBarrier(draw.cb,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				0, 0, NULL, 0, NULL,
+				1, dstBarrier);
+		}
+
+		// optionally blur or clear
+		VkRenderPassBeginInfo rpBegin {};
+		rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		rpBegin.renderArea.extent = info.extent;
+		rpBegin.renderPass = rp_;
+		rpBegin.framebuffer = info.fb;
+
+		VkClearValue clearValues[2] {};
+		// clearValues[0] is ignored.
+		// our depth attachment, always clear that.
+		clearValues[1].depthStencil = {1.f, 0u};
+
+		rpBegin.pClearValues = clearValues;
+		rpBegin.clearValueCount = 2u;
+
+		dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+		// clearing and then blurring does not make sense
+		dlg_assert(!blurred || !info.clear);
+		if(blurred) {
+			VkRect2D scissor;
+			// scissor.offset = {};
+			// scissor.extent = info.extent;
+			scissor.offset.x = std::max(windowPos_.x, 0.f);
+			scissor.offset.y = std::max(windowPos_.y, 0.f);
+			scissor.extent.width = std::min(
+				windowSize_.x + windowPos_.x - scissor.offset.x,
+				info.extent.width - windowPos_.x);
+			scissor.extent.height = std::min(
+				windowSize_.y + windowPos_.y - scissor.offset.y,
+				info.extent.height - windowPos_.y);
+
+			VkViewport viewport;
+			viewport.minDepth = 0.f;
+			viewport.maxDepth = 1.f;
+			viewport.x = 0u;
+			viewport.y = 0u;
+			viewport.width = info.extent.width;
+			viewport.height = info.extent.height;
+			// viewport.x = windowPos_.x;
+			// viewport.y = windowPos_.y;
+			// viewport.width = windowSize_.x;
+			// viewport.height = windowSize_.y;
+
+			dev().dispatch.CmdSetScissor(draw.cb, 0u, 1u, &scissor);
+			dev().dispatch.CmdSetViewport(draw.cb, 0u, 1u, &viewport);
+
+			float pcr[4];
+			// scale
+			pcr[0] = 1.f;
+			pcr[1] = 1.f;
+			// translate
+			pcr[2] = 0.f;
+			pcr[3] = 0.f;
+
+			dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
+			auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
+				VK_SHADER_STAGE_FRAGMENT_BIT |
+				VK_SHADER_STAGE_COMPUTE_BIT;
+			dev().dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
+				pcrStages, 0, sizeof(pcr), pcr);
+			dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				imguiPipeLayout_.vkHandle(), 0u, 1u, &blurDs_.vkHandle(), 0, nullptr);
+			VkDeviceSize off = 0u;
+			dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
+			dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
+		} else if(info.clear) {
+			VkClearAttachment clearAtt {};
+			clearAtt.clearValue.color = {{0.f, 0.f, 0.f, 1.f}};
+			clearAtt.colorAttachment = 0u;
+			clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+			VkClearRect clearRect {};
+			clearRect.rect = {{0u, 0u}, info.extent};
+			clearRect.layerCount = 1u;
+
+			dev().dispatch.CmdClearAttachments(draw.cb, 1u, &clearAtt, 1u, &clearRect);
+		}
+
+		this->recordDraw(draw, info.extent, info.fb, drawData);
+
+		dev().dispatch.CmdEndRenderPass(draw.cb);
+
+		for(auto& cb : postRender_) {
+			cb(draw);
+		}
+		postRender_.clear();
 	}
-
-	for(auto& cb : preRender_) {
-		cb(draw);
-	}
-	preRender_.clear();
-
-	if(info.clear) {
-		VkImageMemoryBarrier dstBarrier[1] = {};
-		dstBarrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		dstBarrier[0].dstAccessMask =
-			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		dstBarrier[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		dstBarrier[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		dstBarrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		dstBarrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		dstBarrier[0].image = info.image;
-		dstBarrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		dstBarrier[0].subresourceRange.levelCount = 1;
-		dstBarrier[0].subresourceRange.layerCount = 1;
-		dev().dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-			0, 0, NULL, 0, NULL,
-			1, dstBarrier);
-	}
-
-	// optionally blur or clear
-	VkRenderPassBeginInfo rpBegin {};
-	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	rpBegin.renderArea.extent = info.extent;
-	rpBegin.renderPass = rp_;
-	rpBegin.framebuffer = info.fb;
-
-	VkClearValue clearValues[2] {};
-	// clearValues[0] is ignored.
-	// our depth attachment, always clear that.
-	clearValues[1].depthStencil = {1.f, 0u};
-
-	rpBegin.pClearValues = clearValues;
-	rpBegin.clearValueCount = 2u;
-
-	dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-	// clearing and then blurring does not make sense
-	dlg_assert(!blurred || !info.clear);
-	if(blurred) {
-		VkRect2D scissor;
-		// scissor.offset = {};
-		// scissor.extent = info.extent;
-		scissor.offset.x = std::max(windowPos_.x, 0.f);
-		scissor.offset.y = std::max(windowPos_.y, 0.f);
-		scissor.extent.width = std::min(
-			windowSize_.x + windowPos_.x - scissor.offset.x,
-			info.extent.width - windowPos_.x);
-		scissor.extent.height = std::min(
-			windowSize_.y + windowPos_.y - scissor.offset.y,
-			info.extent.height - windowPos_.y);
-
-		VkViewport viewport;
-		viewport.minDepth = 0.f;
-		viewport.maxDepth = 1.f;
-		viewport.x = 0u;
-		viewport.y = 0u;
-		viewport.width = info.extent.width;
-		viewport.height = info.extent.height;
-		// viewport.x = windowPos_.x;
-		// viewport.y = windowPos_.y;
-		// viewport.width = windowSize_.x;
-		// viewport.height = windowSize_.y;
-
-		dev().dispatch.CmdSetScissor(draw.cb, 0u, 1u, &scissor);
-		dev().dispatch.CmdSetViewport(draw.cb, 0u, 1u, &viewport);
-
-		float pcr[4];
-		// scale
-		pcr[0] = 1.f;
-		pcr[1] = 1.f;
-		// translate
-		pcr[2] = 0.f;
-		pcr[3] = 0.f;
-
-		dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
-		auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
-			VK_SHADER_STAGE_FRAGMENT_BIT |
-			VK_SHADER_STAGE_COMPUTE_BIT;
-		dev().dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
-			pcrStages, 0, sizeof(pcr), pcr);
-		dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			imguiPipeLayout_.vkHandle(), 0u, 1u, &blurDs_.vkHandle(), 0, nullptr);
-		VkDeviceSize off = 0u;
-		dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
-		dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
-	} else if(info.clear) {
-		VkClearAttachment clearAtt {};
-		clearAtt.clearValue.color = {{0.f, 0.f, 0.f, 1.f}};
-		clearAtt.colorAttachment = 0u;
-		clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-		VkClearRect clearRect {};
-		clearRect.rect = {{0u, 0u}, info.extent};
-		clearRect.layerCount = 1u;
-
-		dev().dispatch.CmdClearAttachments(draw.cb, 1u, &clearAtt, 1u, &clearRect);
-	}
-
-	this->recordDraw(draw, info.extent, info.fb, drawData);
-
-	dev().dispatch.CmdEndRenderPass(draw.cb);
-
-	for(auto& cb : postRender_) {
-		cb(draw);
-	}
-	postRender_.clear();
 
 	dev().dispatch.EndCommandBuffer(draw.cb);
 
@@ -1943,6 +1946,13 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		std::lock_guard devMutex(dev().mutex);
 
 		for(auto& draw : draws_) {
+			// needed to avoid VUID-vkQueueSubmit-pSignalSemaphores-00067:
+			// even though the submission of the draw has finished, it might
+			// not have been unsignaled by presentation yet.
+			if(draw->lastImageID == info.imageIdx) {
+				continue;
+			}
+
 			if(!draw->inUse) {
 				foundDraw = draw.get();
 				break;
@@ -1964,6 +1974,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto& draw = *foundDraw;
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
+	draw.lastImageID = info.imageIdx;
 	foundDraw->lastUsed = ++drawCounter_;
 
 	if(blur_.dev && !info.clear) {

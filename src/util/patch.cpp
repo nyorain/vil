@@ -951,6 +951,11 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 			continue;
 		}
 
+		if(var.debugLocalVariables.empty()) {
+			// TODO: test this
+			// continue;
+		}
+
 		auto name = ir.get_name(varID);
 		if(!var.debugLocalVariables.empty()) {
 			auto& lvar = ir.get<spc::SPIRDebugLocalVariable>(var.debugLocalVariables.front());

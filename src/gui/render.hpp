@@ -85,6 +85,7 @@ struct Draw {
 
 	// frame number in which this draw was last used
 	u64 lastUsed {};
+	u32 lastImageID {};
 
 	Draw(Gui& gui, VkCommandPool);
 	~Draw();
