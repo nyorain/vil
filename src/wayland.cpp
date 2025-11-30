@@ -209,6 +209,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSurfaceKHR*                               pSurface) {
 	auto& ini = getData<Instance>(instance);
+	ini.hasSurface.store(true);
 	auto res = ini.dispatch.vkCreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
 		return res;

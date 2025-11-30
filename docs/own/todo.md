@@ -64,7 +64,7 @@ urgent, bugs:
 new, workstack:
 - [ ] better RT AccelStruct UI
 - [ ] integrate (latest) tracy via meson subproject
-	- [ ] merge back mutex.inner
+	- [x] merge back mutex.inner
 - [ ] make optional dependencies optional (imgio)
 	- [ ] dont build with tracy by default
 - [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
@@ -350,19 +350,6 @@ patch capture shader debugging:
 	- meh does not help much (nvidia, linux). This time is mainly
 	  problematic for ray tracing pipelines.
 	  [ ] Try out pipeline library
-
-spvm:
-- [x] Add OpSpecConstant* support
-- [x] Add OpArrayLength support
-- [ ] merge back changes upstream
-	- [ ] asserts
-	- [x] improved image sampling
-	- [ ] external variable load/store via callback
-	- [ ] other missing opcodes implemented now
-
-glslang (slightly unrelated):
-- [ ] add PR that disables naming of "param" OpVariables
-- [ ] add PR that adds flag to use OpLine with columns for expressions
 
 docs
 - [ ] write small wiki documentation post on how to use API

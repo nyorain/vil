@@ -1727,11 +1727,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 
 	auto& dsLayout = get(device, pCreateInfo->descriptorSetLayout);
 	auto& dev = *dsLayout.dev;
-	auto& pipeLayout = get(dev, pCreateInfo->pipelineLayout);
 
 	auto nci = *pCreateInfo;
 	nci.descriptorSetLayout = dsLayout.handle;
-	nci.pipelineLayout = pipeLayout.handle;
+
+	PipelineLayout* pipeLayout {}; // optional
+	if(pCreateInfo->pipelineLayout) {
+		pipeLayout = &get(dev, pCreateInfo->pipelineLayout);
+		nci.pipelineLayout = pipeLayout->handle;
+	}
 
 	auto res = dev.dispatch.CreateDescriptorUpdateTemplate(dev.handle, &nci,
 		nullptr, pDescriptorUpdateTemplate);
@@ -1744,7 +1748,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 	dut.dev = &dev;
 	dut.handle = *pDescriptorUpdateTemplate;
 	dut.bindPoint = nci.pipelineBindPoint;
-	dut.pipeLayout.reset(&pipeLayout);
+	dut.pipeLayout.reset(pipeLayout);
 	dut.dsLayout.reset(&dsLayout);
 	dut.set = nci.set;
 

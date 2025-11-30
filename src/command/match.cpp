@@ -824,7 +824,7 @@ void add(MatchVal& m, MatchType mt,
 		}
 	} else if (maxPipes > 0) {
 		constexpr auto countWeight = 5;
-		m.match += countWeight * std::min(a.numPipeBinds, b.numPipeBinds) / maxPipes;
+		m.match += countWeight * std::min(a.numPipeBinds, b.numPipeBinds) / float(maxPipes);
 		m.total += countWeight;
 	}
 }

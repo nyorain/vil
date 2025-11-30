@@ -337,13 +337,14 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {
 			true,
 			VK_ATTACHMENT_LOAD_OP_LOAD,
 			VK_ATTACHMENT_STORE_OP_STORE);
-	} else if(!info.rpi) {
+	} else if(!info.splitRendering) {
 		// NOTE that this includes NextSubpass commands, so
 		//   info.BeginRenderPassCmd might still be non-null
 		beforeDstOutsideRp(dst, info);
 	} else {
-		// no-op, we land here when we couldn't split the renderpass :(
-		dlg_assert(!info.splitRendering && info.beginRenderPassCmd);
+		dlg_assertm(false,
+			"{} {} {} {}", info.splitRendering, info.beginRenderPassCmd,
+			info.beginRenderingCmd, info.rpi);
 	}
 }
 
@@ -401,14 +402,15 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 			false,
 			VK_ATTACHMENT_LOAD_OP_LOAD,
 			std::nullopt);
-	} else if(!info.rpi) {
+	} else if(!info.splitRendering) {
 		// we are not inside a render pass instance.
 		// NOTE that this includes NextSubpass commands, so
 		//   info.BeginRenderPassCmd might still be non-null
 		afterDstOutsideRp(dst, info);
 	} else {
-		// no-op, we land here when we couldn't split the renderpass :(
-		dlg_assert(!info.splitRendering && info.beginRenderPassCmd);
+		dlg_assertm(false,
+			"{} {} {} {}", info.splitRendering, info.beginRenderPassCmd,
+			info.beginRenderingCmd, info.rpi);
 	}
 }
 
@@ -846,52 +848,51 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		auto& elem = images(descriptors, bindingID)[elemID];
 		if(needsImageView(bindingLayout.descriptorType)) {
 			auto& imgView = elem.imageView;
-			dlg_assert(imgView);
-			dlg_assert(imgView->img);
-			if(imgView->img) {
-				// We have to handle the special case where a renderpass
-				// attachment is bound in a descriptor set (e.g. as
-				// input attachment). In that case, it will be
-				// in general layout (via our render pass splitting),
-				// not in the layout of the ds.
-				auto layout = elem.layout;
-				if(info.splitRendering && info.beginRenderPassCmd) {
-					dlg_assert(info.beginRenderPassCmd->fb);
-					auto& fb = *info.beginRenderPassCmd->fb;
-					for(auto* att : fb.attachments) {
-						dlg_assert(att->img);
-						if(att->img == imgView->img) {
-							layout = VK_IMAGE_LAYOUT_GENERAL;
-							break;
-						}
-					}
-				} else if(info.splitRendering && info.beginRenderingCmd) {
-					// TODO: handle resolveImageLayout
-					auto* att = info.beginRenderingCmd->findAttachment(*imgView->img);
-					if(att) {
-						layout = att->imageLayout;
+			dlg_assert_or(imgView, return);
+			dlg_assert_or(imgView->img, return);
+
+			// We have to handle the special case where a renderpass
+			// attachment is bound in a descriptor set (e.g. as
+			// input attachment). In that case, it will be
+			// in general layout (via our render pass splitting),
+			// not in the layout of the ds.
+			auto layout = elem.layout;
+			if(info.splitRendering && info.beginRenderPassCmd) {
+				dlg_assert(info.beginRenderPassCmd->fb);
+				auto& fb = *info.beginRenderPassCmd->fb;
+				for(auto* att : fb.attachments) {
+					dlg_assert(att->img);
+					if(att->img == imgView->img) {
+						layout = VK_IMAGE_LAYOUT_GENERAL;
+						break;
 					}
 				}
-
-				// TODO: select exact layer/mip in view range via gui
-				auto subres = imgView->ci.subresourceRange;
-				usedHandles.push_back(imgView->img);
-
-				if(imageAsBuffer) {
-					// we don't ever use that buffer in a submission again
-					// so we can ignore queue families
-					auto& dstBuf = dst.data.emplace<CopiedImageToBuffer>();
-					initAndSampleCopy(dev, cb, dstBuf, *imgView->img, layout,
-						subres, {}, imageViews, bufferViews, descriptorSets);
-
-					// TODO: not always needed, only when we copied via
-					// compute shader. Make that a return value of initAndSampleCopy?
-					info.rebindComputeState = true;
-				} else {
-					auto& dstImg = dst.data.emplace<CopiedImage>();
-					initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
-						record->queueFamily);
+			} else if(info.splitRendering && info.beginRenderingCmd) {
+				// TODO: handle resolveImageLayout
+				auto* att = info.beginRenderingCmd->findAttachment(*imgView->img);
+				if(att) {
+					layout = att->imageLayout;
 				}
+			}
+
+			// TODO: select exact layer/mip in view range via gui
+			auto subres = imgView->ci.subresourceRange;
+			usedHandles.push_back(imgView->img);
+
+			if(imageAsBuffer) {
+				// we don't ever use that buffer in a submission again
+				// so we can ignore queue families
+				auto& dstBuf = dst.data.emplace<CopiedImageToBuffer>();
+				initAndSampleCopy(dev, cb, dstBuf, *imgView->img, layout,
+					subres, {}, imageViews, bufferViews, descriptorSets);
+
+				// TODO: not always needed, only when we copied via
+				// compute shader. Make that a return value of initAndSampleCopy?
+				info.rebindComputeState = true;
+			} else {
+				auto& dstImg = dst.data.emplace<CopiedImage>();
+				initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
+					record->queueFamily);
 			}
 		} else {
 			// We shouldn't land here at all, we catch that case when
@@ -900,7 +901,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		}
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& elem = buffers(descriptors, bindingID)[elemID];
-		dlg_assert(elem.buffer);
+		dlg_assert_or(elem.buffer, return);
 
 		usedHandles.push_back(elem.buffer);
 
@@ -927,6 +928,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		initAndCopy(dev, cb, dstBuf, 0u, *elem.buffer, off, size, {});
 	} else if(cat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(descriptors, bindingID)[elemID];
+		dlg_assert_or(elem.accelStruct, return);
 
 		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
 		auto& dstCapture = dst.data.emplace<CapturedAccelStruct>();

@@ -48,6 +48,7 @@ struct Pipeline : SharedDeviceHandle {
 
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
+	VkPipelineCreateFlags flags {};
 
 	// NOTE: strictly speaking don't need shared ownership of the *handle* here,
 	// just of the creation description it holds.
@@ -95,6 +96,15 @@ struct GraphicsPipeline : Pipeline {
 	bool needsColorBlend : 1;
 
 	IntrusivePtr<XfbPatchDesc> xfbPatch; // valid when we injected xfb
+
+	VkGraphicsPipelineLibraryFlagsEXT libraryFlags {};
+
+	struct {
+		u32 viewMask {};
+		std::vector<VkFormat> colorAttachments;
+		VkFormat depthAttachment {};
+		VkFormat stencilAttachment {};
+	} dynamicRender;
 
 	~GraphicsPipeline();
 };

@@ -81,6 +81,8 @@ DisplayWindow::~DisplayWindow() {
 }
 
 bool DisplayWindow::createDisplay(Instance& ini) {
+	dlg_trace("createDisplay");
+
 	this->ini = &ini;
 	state_.store(State::createDisplay);
 	this->thread_ = std::thread([&]{ uiThread(); });
@@ -94,6 +96,8 @@ bool DisplayWindow::createDisplay(Instance& ini) {
 }
 
 bool DisplayWindow::createWindow(Instance& ini) {
+	dlg_trace("createWindow");
+
 	dlg_assert(dpy);
 	this->ini = &ini;
 
@@ -106,6 +110,8 @@ bool DisplayWindow::createWindow(Instance& ini) {
 }
 
 bool DisplayWindow::initDevice(Device& dev) {
+	dlg_trace("initDevice");
+
 	dlg_assert(this->surface);
 	this->dev = &dev;
 
@@ -118,6 +124,8 @@ bool DisplayWindow::initDevice(Device& dev) {
 }
 
 bool DisplayWindow::doInitSwapchain() {
+	dlg_trace("doInitSwapchain");
+
 	dlg_assert(this->dev);
 	auto& dev = *this->dev;
 
@@ -268,6 +276,8 @@ bool DisplayWindow::doInitSwapchain() {
 }
 
 void DisplayWindow::resize(unsigned w, unsigned h) {
+	dlg_trace("resize");
+
 	auto& dev = *this->dev;
 
 	destroyBuffers();
@@ -308,6 +318,8 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 }
 
 void DisplayWindow::initBuffers() {
+	dlg_trace("initBuffers");
+
 	auto& dev = *this->dev;
 
 	// depth
@@ -374,6 +386,7 @@ void DisplayWindow::destroyBuffers() {
 }
 
 bool DisplayWindow::doCreateDisplay() {
+	dlg_trace("doCreateDisplay");
 	constexpr auto appname = "VIL";
 
 #if defined(SWA_WITH_X11) && defined(SWA_WITH_WL)
@@ -383,8 +396,11 @@ bool DisplayWindow::doCreateDisplay() {
 	// TODO: should extend swa to be able to create vk surfaces via Xlib
 	// as well, in case applications only have that supported.
 	if(ini) {
-		if(contains(ini->extensions, "VK_KHR_xcb_surface") &&
-				!contains(ini->extensions, "VK_KHR_wayland_surface")) {
+		auto hasX =
+			contains(ini->extensions, "VK_KHR_xcb_surface") ||
+			contains(ini->extensions, "VK_KHR_xlib_surface");
+		auto hasWL = contains(ini->extensions, "VK_KHR_wayland_surface");
+		if(hasX && !hasWL) {
 			dpy = swa_display_x11_create(appname);
 			if(dpy) {
 				return true;
@@ -398,6 +414,7 @@ bool DisplayWindow::doCreateDisplay() {
 }
 
 bool DisplayWindow::doCreateWindow() {
+	dlg_trace("doCreateWindow");
 	dlg_assert(this->ini);
 
 	static swa_window_listener listener;
@@ -416,6 +433,15 @@ bool DisplayWindow::doCreateWindow() {
 	ws.surface = swa_surface_vk;
 	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(this->ini->handle);
 	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(this->ini->dispatch.GetInstanceProcAddr);
+
+#if defined(SWA_WITH_X11)
+	auto hasXCB = contains(ini->extensions, "VK_KHR_xcb_surface");
+	auto hasXlib = contains(ini->extensions, "VK_KHR_xlib_surface");
+	if(hasXlib && !hasXCB) {
+		ws.prefer_xlib = true;
+	}
+#endif // defined(SWA_WITH_X11)
+
 	window = swa_display_create_window(dpy, &ws);
 	if(!window) {
 		return false;
@@ -436,6 +462,7 @@ bool DisplayWindow::doCreateWindow() {
 		((u32*)icon.data)[i] = 0xFFFFAA00u; // orange
 	}
 
+	dlg_trace("window_set_icon");
 	swa_window_set_icon(window, &icon);
 	free(icon.data);
 
@@ -443,6 +470,8 @@ bool DisplayWindow::doCreateWindow() {
 }
 
 void DisplayWindow::doMainLoop() {
+	dlg_trace("doMainLoop");
+
 	// run main loop!
 	dlg_assert(this->presentQueue);
 	dlg_assert(this->swapchain);
@@ -473,6 +502,7 @@ void DisplayWindow::doMainLoop() {
 		auto now = Clock::now();
 		auto nextIterationTime = now + minIterationTime;
 
+		dlg_trace("dispatch");
 		if(!swa_display_dispatch(dpy, false)) {
 			run_.store(false);
 			break;
@@ -491,6 +521,7 @@ void DisplayWindow::doMainLoop() {
 		// would potentially mean less latency since that waiting for
 		// vsync currently effectively happens at the end of Gui::draw
 		// (where we wait for the submission).
+		dlg_trace("acquire");
 		VkResult res = dev->dispatch.AcquireNextImageKHR(dev->handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
@@ -547,12 +578,14 @@ void DisplayWindow::doMainLoop() {
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;
 
+		dlg_trace("renderFrame");
 		gui->renderFrame(frameInfo);
 
 		// There is no advantage in having multiple draws pending at
 		// the same time, we don't need to squeeze every last fps
 		// out of the debug window. Waiting here is better than potentially
 		// somewhere in a critical section.
+		dlg_trace("waitForDraws");
 		gui->waitForDraws();
 
 		// NOTE(experimental): we also might wanna limit refreshing of this window
@@ -560,6 +593,7 @@ void DisplayWindow::doMainLoop() {
 		// but will *significantly* block other vulkan progress (due to
 		// gui mutex locking) when rendering at high rates.
 		if(limitRefreshRate) {
+			dlg_trace("sleep");
 			std::this_thread::sleep_until(nextIterationTime);
 		}
 	}
@@ -578,6 +612,7 @@ void DisplayWindow::uiThread() {
 		dlg_assert(state_.load() == State::createDisplay);
 		doCreateDisplay();
 		if (!dpy) {
+			dlg_trace("display creation failed!");
 			state_.store(State::shutdown);
 			cv_.notify_one();
 			return;
@@ -591,16 +626,19 @@ void DisplayWindow::uiThread() {
 		cv_.wait(lock, pred1);
 
 		if(!run_.load()) {
+			dlg_trace("exiting window thread");
 			return;
 		}
 
 		// step 1: window creation
 		if(!doCreateWindow()) {
+			dlg_error("window creation failed!");
 			state_.store(State::shutdown);
 			cv_.notify_one();
 			return;
 		}
 
+		dlg_trace("windowCreated!");
 		state_.store(State::windowCreated);
 		cv_.notify_one();
 
@@ -609,11 +647,13 @@ void DisplayWindow::uiThread() {
 		cv_.wait(lock, pred2);
 
 		if(!run_.load()) {
+			dlg_trace("exiting window thread");
 			return;
 		}
 
 		// step 2: swapchain creation
 		if(!doInitSwapchain()) {
+			dlg_error("swapchain creation failed!");
 			state_.store(State::shutdown);
 			cv_.notify_one();
 			return;

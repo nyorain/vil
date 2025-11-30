@@ -79,16 +79,23 @@ bool CommandSelection::update() {
 			return nullptr;
 		}
 
+		u64 minID = u64(-1);
+		u64 maxID = 0u;
 		for(auto& frame : swapchain->frameSubmissions) {
+			minID = std::min(minID, frame.submissionStart);
+			maxID = std::max(maxID, frame.submissionEnd);
 			if(submissionID >= frame.submissionStart &&
 					submissionID <= frame.submissionEnd) {
 				return &frame;
 			}
 		}
 
-		dlg_warn("Couldn't find frame associated to hooked submission");
+		dlg_warn("Couldn't find frame associated to hooked submission {}. Seen submissions {} - {}",
+			submissionID, minID, maxID);
 		return nullptr;
 	};
+
+	dlg_debug("{} completed hooked submission", completed.size());
 
 	// TODO: just set this to true for non-swapchain modes as well?
 	bool chooseLast = false;
@@ -105,6 +112,7 @@ bool CommandSelection::update() {
 		}
 
 		chooseLast = !multipleMatchesInLastFrame;
+		dlg_debug(">> chooseLast {}", chooseLast);
 	}
 
 	auto bestMatch = 0.f;
@@ -146,8 +154,11 @@ bool CommandSelection::update() {
 	}
 
 	if(!best) {
+		dlg_debug(">> no new hook submission found");
 		return false;
 	}
+
+	dlg_debug(">> new hook submission. Match: {}", bestMatch);
 
 	// Update internal state state from hook match
 	// In swapchain mode - and when not freezing commands - make

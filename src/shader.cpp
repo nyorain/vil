@@ -528,6 +528,29 @@ void ShaderModule::clearXfb() {
 	xfb.clear();
 }
 
+void initShaderModule(ShaderModule& mod, span<const u32> code) {
+	// TODO: catch errors here
+	mod.compiled = std::make_unique<spc::Compiler>(code.data(), code.size());
+
+	// compute hash
+	for(auto i = 0u; i < code.size(); ++i) {
+		hash_combine(mod.spirvHash, code[i]);
+	}
+
+	// copy default values of specialization constants
+	auto& compiled = *mod.compiled;
+	auto specConstants = compiled.get_specialization_constants();
+	for(auto& sc : specConstants) {
+		auto& entry = mod.constantDefaults.emplace_back();
+		entry.constantID = sc.constant_id;
+
+		auto& constant = compiled.get_constant(sc.id);
+		dlg_assert(constant.m.columns == 1u);
+		dlg_assert(constant.m.c[0].vecsize == 1u);
+		entry.constant = std::make_unique<spc::SPIRConstant>(constant);
+	}
+}
+
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 		VkDevice                                    device,
@@ -546,28 +569,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 
 	dlg_assert(pCreateInfo->codeSize % 4 == 0);
 
-	// TODO: catch errors here
-	mod.compiled = std::make_unique<spc::Compiler>(
-		pCreateInfo->pCode, pCreateInfo->codeSize / 4);
-
-	// compute hash
-	for(auto i = 0u; i < pCreateInfo->codeSize / 4; ++i) {
-		hash_combine(mod.spirvHash, pCreateInfo->pCode[i]);
-	}
-
-	// copy default values of specialization constants
-	auto& compiled = *mod.compiled;
-	auto specConstants = compiled.get_specialization_constants();
-	for(auto& sc : specConstants) {
-		auto& entry = mod.constantDefaults.emplace_back();
-		entry.constantID = sc.constant_id;
-
-		auto& constant = compiled.get_constant(sc.id);
-		dlg_assert(constant.m.columns == 1u);
-		dlg_assert(constant.m.c[0].vecsize == 1u);
-		entry.constant = std::make_unique<spc::SPIRConstant>(constant);
-	}
-
+	initShaderModule(mod, {pCreateInfo->pCode, pCreateInfo->codeSize / 4});
 	return res;
 }
 

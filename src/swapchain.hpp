@@ -43,7 +43,8 @@ struct Swapchain : SharedDeviceHandle {
 	// swapchain is called. Not reset on swapchain recreation.
 	u64 presentCounter {};
 
-	static constexpr auto frameSubmissionCount = 8u;
+	// TODO: use vector instead? Cleared when matched?
+	static constexpr auto frameSubmissionCount = 16u;
 	std::array<FrameSubmissions, frameSubmissionCount> frameSubmissions;
 	FrameSubmissions nextFrameSubmissions; // currently being built
 
@@ -89,5 +90,18 @@ VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(
     VkSwapchainKHR                              swapchain,
     uint32_t*                                   pSwapchainImageCount,
     VkImage*                                    pSwapchainImages);
+
+// VK_KHR_present_wait
+VKAPI_ATTR VkResult VKAPI_CALL WaitForPresentKHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint64_t                                    presentId,
+    uint64_t                                    timeout);
+
+// VK_KHR_present_wait2
+VKAPI_ATTR VkResult VKAPI_CALL WaitForPresent2KHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    const VkPresentWait2InfoKHR*                pPresentWait2Info);
 
 } // namespace vil

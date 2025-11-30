@@ -29,7 +29,21 @@ PipelineShaderStage::PipelineShaderStage(Device& dev, const VkPipelineShaderStag
 	stage = sci.stage;
 	specialization = createShaderSpecialization(sci.pSpecializationInfo);
 
-	spirv = getPtr(dev, sci.module);
+	if (sci.module) {
+		spirv = getPtr(dev, sci.module);
+	} else if (sci.pNext) {
+		auto* info = findChainInfo<VkShaderModuleCreateInfo,
+			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO>(sci);
+		if (info) {
+			spirv.reset(new ShaderModule());
+			spirv->dev = &dev;
+
+			dlg_assert(info->codeSize % 4 == 0);
+			initShaderModule(*spirv, {info->pCode, info->codeSize / 4});
+		}
+
+	}
+
 	entryPoint = sci.pName;
 }
 
@@ -64,7 +78,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		auto& nci = ncis[i];
-		nci.layout = get(dev, nci.layout).handle;
+
+		if(nci.layout) {
+			nci.layout = get(dev, nci.layout).handle;
+		}
 
 		if(nci.basePipelineHandle) {
 			auto& basePipe = get(dev, nci.basePipelineHandle);
@@ -90,8 +107,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		for(auto s = 0u; s < nci.stageCount; ++s) {
 			auto src = nci.pStages[s];
 			if(src.stage == VK_SHADER_STAGE_VERTEX_BIT && useXfb) {
-				dlg_assert(xfbVertexStageID == u32(-1));
-				xfbVertexStageID = u32(stages.size());
+				// TODO: support pNext = ShaderModuleCreateInfo here!
+				if(src.module) {
+					dlg_assert(xfbVertexStageID == u32(-1));
+					xfbVertexStageID = u32(stages.size());
+				}
 			}
 
 			if(src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT ||
@@ -161,6 +181,31 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		}
 
 		nci.pStages = stages.data();
+
+		// extension patching
+		bool copiedChain {};
+		if(hasChain(nci, VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR)) {
+			if(!copiedChain) {
+				nci.pNext = copyChainLocal(memScope, nci.pNext);
+				copiedChain = true;
+			}
+
+			auto* libInfoC = findChainInfo<VkPipelineLibraryCreateInfoKHR,
+				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR>(nci);
+			auto* libInfo = const_cast<VkPipelineLibraryCreateInfoKHR*>(libInfoC);
+
+			auto copies = memScope.alloc<VkPipeline>(libInfo->libraryCount);
+			for(auto i = 0u; i < copies.size(); ++i) {
+				if(libInfo->pLibraries[i]) {
+					auto& pipe = get(dev, libInfo->pLibraries[i]);
+					copies[i] = pipe.handle;
+				}
+			}
+
+			libInfo->pLibraries = copies.data();
+
+			// TODO: store used pipe libs for UI
+		}
 	}
 
 	{
@@ -179,16 +224,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		auto pipePtr = IntrusivePtr<GraphicsPipeline>(new GraphicsPipeline());
 		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
+		pipe.flags = pci.flags;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
-		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.renderPass = std::move(pres[i].rp);
 		pipe.subpass = pci.subpass;
 
-		// TODO: handle pNext infos.
-		// - dynamic rendering
-
-		pci.layout = pipe.layout->handle;
+		if(pCreateInfos[i].layout) {
+			pipe.layout = getPtr(dev, pCreateInfos[i].layout);
+		}
 
 		[[maybe_unused]] auto colorAttachmentCount = 0u;
 		auto hasDepthStencil = false;
@@ -217,7 +261,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			pipe.hasMeshShader |= (stage.stage == VK_SHADER_STAGE_MESH_BIT_EXT);
 		}
 
-		pipe.rasterizationState = *pci.pRasterizationState;
+		if(pci.pRasterizationState) {
+			pipe.rasterizationState = *pci.pRasterizationState;
+		}
 
 		if(pci.pDynamicState) {
 			pipe.dynamicState = {
@@ -228,8 +274,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		if(!pipe.hasMeshShader) {
 			// vertex input state ignored if dynamic vertex input is set
-			if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_EXT)) {
-				dlg_assert(pci.pVertexInputState);
+			if(pci.pVertexInputState &&
+					!pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_EXT)) {
+
 				pipe.vertexAttribs = {
 					pci.pVertexInputState->pVertexAttributeDescriptions,
 					pci.pVertexInputState->pVertexAttributeDescriptions + pci.pVertexInputState->vertexAttributeDescriptionCount
@@ -242,36 +289,45 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				pipe.vertexInputState = *pci.pVertexInputState;
 			}
 
-			pipe.inputAssemblyState = *pci.pInputAssemblyState;
+			if(pci.pInputAssemblyState) {
+				pipe.inputAssemblyState = *pci.pInputAssemblyState;
+			}
 		}
 
-		if(!pci.pRasterizationState->rasterizerDiscardEnable) {
-			pipe.multisampleState = *pci.pMultisampleState;
-			pipe.viewportState = *pci.pViewportState;
-
-			if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
-				pipe.scissors = {
-					pipe.viewportState.pScissors,
-					pipe.viewportState.pScissors + pipe.viewportState.scissorCount
-				};
+		if(!pipe.rasterizationState.rasterizerDiscardEnable) {
+			if(pci.pMultisampleState) {
+				pipe.multisampleState = *pci.pMultisampleState;
 			}
 
-			if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
-				pipe.viewports = {
-					pipe.viewportState.pViewports,
-					pipe.viewportState.pViewports + pipe.viewportState.viewportCount
-				};
+			if(pci.pViewportState) {
+				pipe.viewportState = *pci.pViewportState;
+
+				if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
+					pipe.scissors = {
+						pipe.viewportState.pScissors,
+						pipe.viewportState.pScissors + pipe.viewportState.scissorCount
+					};
+				}
+
+				if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
+					pipe.viewports = {
+						pipe.viewportState.pViewports,
+						pipe.viewportState.pViewports + pipe.viewportState.viewportCount
+					};
+				}
 			}
 
 			pipe.hasDepthStencil = hasDepthStencil;
-			if(pipe.hasDepthStencil) {
+			if(pci.pDepthStencilState) {
 				pipe.depthStencilState = *pci.pDepthStencilState;
 			}
 		}
 
 		if(pipe.hasTessellation) {
 			dlg_assert(pci.pTessellationState);
-			pipe.tessellationState = *pci.pTessellationState;
+			if(pci.pTessellationState) {
+				pipe.tessellationState = *pci.pTessellationState;
+			}
 		}
 
 		// NOTE: even if there are color attachments, pColorBlendState might
@@ -283,12 +339,33 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			!pci.pRasterizationState->rasterizerDiscardEnable;
 		if(pipe.needsColorBlend) {
 			dlg_assert(pci.pColorBlendState);
-			pipe.blendAttachments = {
-				pci.pColorBlendState->pAttachments,
-				pci.pColorBlendState->pAttachments + pci.pColorBlendState->attachmentCount
-			};
+			if(pci.pColorBlendState) {
+				pipe.blendAttachments = {
+					pci.pColorBlendState->pAttachments,
+					pci.pColorBlendState->pAttachments + pci.pColorBlendState->attachmentCount
+				};
 
-			pipe.colorBlendState = *pci.pColorBlendState;
+				pipe.colorBlendState = *pci.pColorBlendState;
+			}
+		}
+
+		// extensions
+		auto* glibInfo = findChainInfo<VkGraphicsPipelineLibraryCreateInfoEXT,
+			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT>(pci);
+		if(glibInfo) {
+			pipe.libraryFlags = glibInfo->flags;
+		}
+
+		auto* dynRenderInfo = findChainInfo<VkPipelineRenderingCreateInfo,
+			VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO>(pci);
+		if(dynRenderInfo) {
+			pipe.dynamicRender.viewMask = dynRenderInfo->viewMask;
+			pipe.dynamicRender.depthAttachment = dynRenderInfo->depthAttachmentFormat;
+			pipe.dynamicRender.stencilAttachment = dynRenderInfo->stencilAttachmentFormat;
+			pipe.dynamicRender.colorAttachments = {
+				dynRenderInfo->pColorAttachmentFormats,
+				dynRenderInfo->pColorAttachmentFormats + dynRenderInfo->colorAttachmentCount
+			};
 		}
 
 		fixPointers(pipe);
@@ -341,6 +418,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.stage = PipelineShaderStage(dev, pCreateInfos[i].stage);
+		pipe.flags = pCreateInfos[i].flags;
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
@@ -405,8 +483,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	auto dslHandles = memScope.alloc<VkDescriptorSetLayout>(pCreateInfo->setLayoutCount);
 	auto dsls = std::vector<IntrusivePtr<DescriptorSetLayout>>(pCreateInfo->setLayoutCount);
 	for(auto i = 0u; i < pCreateInfo->setLayoutCount; ++i) {
-		dsls[i] = getPtr(dev, pCreateInfo->pSetLayouts[i]);
-		dslHandles[i] = dsls[i]->handle;
+		if (pCreateInfo->pSetLayouts[i]) {
+			dsls[i] = getPtr(dev, pCreateInfo->pSetLayouts[i]);
+			dslHandles[i] = dsls[i]->handle;
+		}
 	}
 
 	auto nci = *pCreateInfo;
@@ -414,6 +494,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 
 	auto res = dev.dispatch.CreatePipelineLayout(dev.handle, &nci, nullptr, pPipelineLayout);
 	if(res != VK_SUCCESS) {
+		dlg_trace("forward {}", res);
 		return res;
 	}
 
@@ -430,6 +511,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	*pPipelineLayout = castDispatch<VkPipelineLayout>(pl);
 	dev.pipeLayouts.mustEmplace(*pPipelineLayout, std::move(plPtr));
 
+	dlg_trace(">> res: {}", res);
 	return res;
 }
 
@@ -653,6 +735,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, ci.layout);
 		pipe.maxPipelineRayRecursionDepth = ci.maxPipelineRayRecursionDepth;
+		pipe.flags = ci.flags;
 
 		// TODO: support, for shader patching
 		dlg_assertm(!ci.pLibraryInfo, "not supported");

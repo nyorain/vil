@@ -153,7 +153,7 @@ enum class CommandType : u32 {
 	executeGeneratedCommands,
 	preprocessGeneratedCommands,
 
-	// VK_EXT_device_generated_commands
+	// VK_EXT_extended_dynamic_state3
 	setDepthClampEnable,
 	setPolygonMode,
 	setRasterizationSamples,
@@ -175,6 +175,9 @@ enum class CommandType : u32 {
 	setLineRasterizationMode,
 	setLineStippleEnable,
 	setDepthClipNegativeOneToOneEXT,
+
+	// VK_EXT_depth_bias_control
+	setDepthBias2,
 
 	count,
 };
@@ -370,6 +373,8 @@ struct Barrier2CmdBase : Command {
 
 	span<Image*> images;
 	span<Buffer*> buffers;
+
+	const void* pNext {};
 
 	void displayInspector(Gui& gui) const override;
 	MatchVal doMatch(const Barrier2CmdBase& rhs) const;
@@ -651,11 +656,14 @@ struct DrawMeshTasksIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType:
 struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBuffers> {
 	u32 firstBinding;
 	span<BoundVertexBuffer> buffers;
+	bool v2 {}; // whether CmdBindVertexBuffers2 was used.
+	bool strides {}; // whether strides were passed
+	bool sizes {}; // whether sizes were passed
 
 	std::string toString() const override;
 	void displayInspector(Gui&) const override;
 
-	std::string_view nameDesc() const override { return "BindVertexBuffers"; }
+	std::string_view nameDesc() const override { return v2 ? "BindVertexBuffers2" : "BindVertexBuffers"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 };
@@ -1264,7 +1272,7 @@ struct SetScissorWithCountCmd final : CmdDerive<Command, CommandType::setScissor
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 };
 
-// BindVertexBuffers2Cmd should be mapped via BindVertexBuffers
+// BindVertexBuffers2Cmd is mapped via BindVertexBuffers
 
 struct SetDepthTestEnableCmd final : CmdDerive<Command, CommandType::setDepthTestEnable> {
 	bool enable;
@@ -1789,11 +1797,26 @@ struct SetDepthClipNegativeOneToOneEXTCmd final : CmdDerive<Command, CommandType
 	Category category() const override { return Category::bind; }
 };
 
+// VK_EXT_depth_bias_control
+struct SetDepthBias2Cmd final : CmdDerive<Command, CommandType::setDepthBias2> {
+    float depthBiasConstantFactor {};
+    float depthBiasClamp {};
+    float depthBiasSlopeFactor {};
+	const void* pNext {};
+
+	std::string_view nameDesc() const override { return "SetDepthBias2EXT"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
 
 // F: overloaded function type of signature void(<Command Types>*)
 // Will call f with cmd casted to the type indicated by cmdType.
 // Can be used to implement the visitor pattern, as the overloaded function
 // could also just accept base classes.
+// Can be called with cmd = nullptr, f will just get a nullptr of the type
+// representing 'cmdType' then. Otherwise cmdType must match cmd->type() to
+// not cast incorrectly.
 template<typename F>
 auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	using CT = CommandType;
@@ -1920,6 +1943,7 @@ auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	case CT::setLineRasterizationMode: return f(static_cast<SetLineRasterizationModeCmd*>(cmd));
 	case CT::setLineStippleEnable: return f(static_cast<SetLineStippleEnableCmd*>(cmd));
 	case CT::setDepthClipNegativeOneToOneEXT: return f(static_cast<SetDepthClipNegativeOneToOneEXTCmd*>(cmd));
+	case CT::setDepthBias2: return f(static_cast<SetDepthBias2Cmd*>(cmd));
 	case CT::count:
 		dlg_error("Invalid command type");
 	// NOTE: no default case by design so that we get compiler warnings about

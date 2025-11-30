@@ -12,12 +12,12 @@ Environment variables
   This has an impact on performance (mainly for multi-threaded applications)
   but increases the chance that vil works with extensions it does not
   explicitly support.
-- ` VIL_WRAP_{HandleType}={0, 1}` more fine-granular handle wrapping 
+- ` VIL_WRAP_{HandleType}={0, 1}` more fine-granular handle wrapping
   configuration for each handle type. Can be used to minimize performance impact
-  for non-wrapped handles that an application needs. 
+  for non-wrapped handles that an application needs.
   Only has an effect for handle types that have support for wrapping in vil
   in the first place. For instance,
-  	- `VIL_WRAP_COMMAND_BUFFER` 
+  	- `VIL_WRAP_COMMAND_BUFFER`
 	- `VIL_WRAP_DESCRIPTOR_SET`
 	- `VIL_WRAP_IMAGE_VIEW`
 	- `VIL_WRAP_BUFFER`
@@ -52,3 +52,7 @@ Environment variables
   sure the framerate isn't too high. Rendering the vil UI locks mutexes
   and a high debug UI framerate might slow down your application.
   (Less important now that most critical sections in UI rendering are short)
+
+- `VIL_WAIT_SURFACE={0, 1}`, default 0. Wait until the application has created
+  a surface object until the window is initialized. Fixes window initialization
+  for DXVK. If you have a compute-only application, this needs to be 0.

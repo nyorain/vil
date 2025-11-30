@@ -51,6 +51,7 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 	}
 }
 
+// TODO: optionally(?) take a list of expected sTypes
 const void* copyChain(CommandBuffer& cb, const void* pNext) {
 	auto ret = pNext;
 	copyChainInPlace(cb, ret);
@@ -821,6 +822,7 @@ void cmdBarrier(CommandBuffer& cb, Barrier2CmdBase& cmd,
 	cmd.bufBarriers = copySpan(cb, di.pBufferMemoryBarriers, di.bufferMemoryBarrierCount);
 	cmd.memBarriers = copySpan(cb, di.pMemoryBarriers, di.memoryBarrierCount);
 	cmd.flags = di.dependencyFlags;
+	cmd.pNext = copyChain(cb, di.pNext);
 
 	cmd.images = alloc<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
@@ -1197,11 +1199,17 @@ span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets,
 		const VkDeviceSize*                         pSizes,
-		const VkDeviceSize*                         pStrides) {
+		const VkDeviceSize*                         pStrides, bool v2) {
+
+	dlg_assert(v2 || !pSizes);
+	dlg_assert(v2 || !pOffsets);
 
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
+	cmd.v2 = v2;
+	cmd.strides = !!pStrides;
+	cmd.sizes = !!pSizes;
 
 	auto& gs = cb.newGraphicsState();
 	gs.vertices = copyEnsureSizeUndef(cb, gs.vertices, firstBinding + bindingCount);
@@ -1239,7 +1247,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	auto& cb = getCommandBuffer(commandBuffer);
 	ThreadMemScope tms;
 	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
-		pBuffers, pOffsets, nullptr, nullptr);
+		pBuffers, pOffsets, nullptr, nullptr, false);
 	cb.dev->dispatch.CmdBindVertexBuffers(cb.handle,
 		firstBinding, bindingCount, bufHandles.data(), pOffsets);
 }
@@ -2855,7 +2863,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2(
 	auto& cb = getCommandBuffer(commandBuffer);
 	ThreadMemScope tms;
 	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
-		pBuffers, pOffsets, pSizes, pStrides);
+		pBuffers, pOffsets, pSizes, pStrides, true);
 	cb.dev->dispatch.CmdBindVertexBuffers2EXT(cb.handle,
 		firstBinding, bindingCount, bufHandles.data(), pOffsets, pSizes,
 		pStrides);
@@ -4125,6 +4133,77 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthClipNegativeOneToOneEXT(
 	auto& cmd = addCmd<SetDepthClipNegativeOneToOneEXTCmd>(cb);
 	cmd.enable = negativeOneToOne;
 	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+// transform feedback
+VKAPI_ATTR void VKAPI_CALL CmdBindTransformFeedbackBuffersEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstBinding,
+		uint32_t                                    bindingCount,
+		const VkBuffer*                             pBuffers,
+		const VkDeviceSize*                         pOffsets,
+		const VkDeviceSize*                         pSizes) {
+	dlg_error("unimplemented");
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginTransformFeedbackEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstCounterBuffer,
+		uint32_t                                    counterBufferCount,
+		const VkBuffer*                             pCounterBuffers,
+		const VkDeviceSize*                         pCounterBufferOffsets) {
+	dlg_error("unimplemented");
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndTransformFeedbackEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstCounterBuffer,
+		uint32_t                                    counterBufferCount,
+		const VkBuffer*                             pCounterBuffers,
+		const VkDeviceSize*                         pCounterBufferOffsets) {
+	dlg_error("unimplemented");
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginQueryIndexedEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query,
+		VkQueryControlFlags                         flags,
+		uint32_t                                    index) {
+	dlg_error("unimplemented");
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndQueryIndexedEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query,
+		uint32_t                                    index) {
+	dlg_error("unimplemented");
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectByteCountEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    instanceCount,
+		uint32_t                                    firstInstance,
+		VkBuffer                                    counterBuffer,
+		VkDeviceSize                                counterBufferOffset,
+		uint32_t                                    counterOffset,
+		uint32_t                                    vertexStride) {
+	dlg_error("unimplemented");
+}
+
+// VK_EXT_depth_bias_control
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias2EXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkDepthBiasInfoEXT*                   pDepthBiasInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthBias2Cmd>(cb);
+	cmd.depthBiasClamp = pDepthBiasInfo->depthBiasClamp;
+	cmd.depthBiasSlopeFactor = pDepthBiasInfo->depthBiasSlopeFactor;
+	cmd.depthBiasConstantFactor = pDepthBiasInfo->depthBiasConstantFactor;
+	cmd.pNext = copyChain(cb, pDepthBiasInfo->pNext);
+
+	cb.dev->dispatch.CmdSetDepthBias2EXT(cb.handle, pDepthBiasInfo);
 }
 
 } // namespace vil

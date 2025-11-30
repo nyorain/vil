@@ -659,6 +659,7 @@ typedef struct VkLayerDispatchTable_ {
 
     // ---- VK_KHR_present_wait extension commands
     PFN_vkWaitForPresentKHR WaitForPresentKHR;
+    PFN_vkWaitForPresent2KHR WaitForPresent2KHR;
 
     // ---- VK_KHR_buffer_device_address extension commands
     PFN_vkGetBufferDeviceAddressKHR GetBufferDeviceAddressKHR;

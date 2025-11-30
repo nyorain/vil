@@ -114,6 +114,8 @@ struct ShaderModule : SharedDeviceHandle {
 	void clearXfb();
 };
 
+void initShaderModule(ShaderModule& mod, span<const u32> code);
+
 // Will set the given specialization, entryPoint and execution model into
 // '*mod.compiled'.
 // Might still need to call spc::Compiler::update_active_builtins() after this,

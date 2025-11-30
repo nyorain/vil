@@ -148,8 +148,8 @@ void CommandRecordGui::draw(Draw& draw) {
 		// - Disable in frames where the window was scrolled? and then
 		//   store the new scroll offset instead? This currently prevents scrolling
 		//  - make this work for parent commands (needs changes in DisplayVisitor I guess)
-		// ImGui::Separator();
-		// ImGui::Checkbox("Focus Selected", &focusSelected_);
+		ImGui::Separator();
+		ImGui::Checkbox("Focus Selected", &focusSelected_);
 
 		// TODO: WIP
 		ImGui::Checkbox("Freeze Commands on Sparse Bind", &freezeOnSparseBind_);
@@ -301,7 +301,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			// force update
 			if(!freezeCommands_) {
 				updateRecords(swapchain->frameSubmissions[0].batches,
-					{}, {});
+					{}, {}, {});
 			}
 		}
 	}
@@ -558,6 +558,7 @@ void CommandRecordGui::displaySubmission(FrameSubmission& batch, u32 subID) {
 
 	// check if open state changed
 	if(open && !opened) {
+		dlg_trace("opened record {}", rec.get());
 		openedRecords_.insert(rec.get());
 	} else if(!open && opened) {
 		openedRecords_.erase(rec.get());
@@ -610,7 +611,7 @@ void CommandRecordGui::displaySubmission(FrameSubmission& batch, u32 subID) {
 }
 
 void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
-	const auto id = dlg::format("submission:{}", batchID);
+	const auto id = dlg::format("submission:{}", batch.submissionID);
 	auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
 
 	// check if this vkQueueSubmit was selected
@@ -660,7 +661,8 @@ void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
 	}
 
 	// check if open state changed
-	if(open && !opened) {
+	if(open && !opened && !empty) {
+		dlg_trace("opened batch {}", &batch);
 		openedSubmissions_.insert(&batch);
 	} else if(!open && opened) {
 		openedSubmissions_.erase(&batch);
@@ -802,8 +804,68 @@ void addMatches(
 	}
 }
 
+void addTextToDebugWindow(Gui& gui, std::string_view txt) {
+	if(!gui.showDebug) {
+		return;
+	}
+
+	if(ImGui::Begin("vil_debug")) {
+		imGuiText("{}", txt);
+	}
+	ImGui::End();
+}
+
+std::string description(span<const FrameSubmission> subm,
+		const FrameSubmission* submission,
+		const CommandRecord* mrec = {},
+		span<const Command* const> cmds = {}) {
+	if(!submission) {
+		return "<null>";
+	}
+
+	for(auto [i, sub] : enumerate(subm)) {
+		if(&sub != submission) {
+			continue;
+		}
+
+		auto str = dlg::format("{}.", i);
+
+		for(auto [j, rec] : enumerate(sub.submissions)) {
+			if(mrec != rec) {
+				continue;
+			}
+
+			str += dlg::format("{}|", j);
+
+			auto* it = (Command*) rec->commands;
+			auto k = 0u;
+			while(it && !cmds.empty()) {
+				if(it == cmds[0]) {
+					str += dlg::format("{}.", k);
+					it = it->children();
+					cmds = cmds.subspan(1u);
+					k = 0u;
+					continue;
+				}
+
+				it = it->next;
+				++k;
+			}
+
+			if(!cmds.empty()) {
+				str += dlg::format("|{}?", cmds.size());
+			}
+		}
+
+		return str;
+	}
+
+	return "<invalid>";
+}
+
 void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		std::vector<FrameSubmission>&& records,
+		u32 newSubmissionIDGiven,
 		IntrusivePtr<CommandRecord> newRecordGiven,
 		std::vector<const Command*> newCommandGiven) {
 	ThreadMemScope tms;
@@ -829,6 +891,7 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 
 		if(openedSubmissions_.count(batchMatch.a)) {
 			newOpenSubmissions.insert(batchMatch.b);
+			tmp_.transitionedSubmissions.insert(batchMatch.a);
 			dlg_assert(batchMatch.b - records.data() <= i64(records.size()));
 		}
 
@@ -840,6 +903,7 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 			}
 
 			if(openedRecords_.count(recordMatch.a)) {
+				tmp_.transitionedRecords.insert(recordMatch.a);
 				newOpenRecords.insert(recordMatch.b);
 			}
 
@@ -857,19 +921,54 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	}
 
 	VIL_DEBUG_ONLY(
+		for(auto& open : openedSubmissions_) {
+			if(!tmp_.transitionedSubmissions.count(open)) {
+				dlg_trace("Losing open submission {}", open);
+				addTextToDebugWindow(*gui_, "Losing open submission");
+			}
+		}
+
+		for(auto& open : openedRecords_) {
+			if(!tmp_.transitionedRecords.count(open)) {
+				dlg_trace("Losing open record {}", open);
+				addTextToDebugWindow(*gui_, "Losing open record");
+			}
+		}
+
 		for(auto& open : openedSections_) {
 			if(!transitionedSections.count(open)) {
 				if(auto* lbl = commandCast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
 					dlg_trace("Losing open label {}", lbl->name);
+					addTextToDebugWindow(*gui_, "Losing open label");
 				} else {
 					dlg_trace("Losing open cmd {}", (const void*) open);
+					addTextToDebugWindow(*gui_, "Losing open cmd");
 				}
 			}
 		}
 	);
 
 	if(newRecordGiven) {
-		dlg_assert(newRecordGiven == newRecord);
+		if(newRecordGiven != newRecord) {
+			FrameSubmission* newSubmissionGiven {};
+
+			for(auto& subm : records) {
+				if(subm.submissionID == newSubmissionIDGiven) {
+					newSubmissionGiven = &subm;
+				}
+			}
+
+			dlg_assert(newSubmissionGiven);
+
+			dlg_assertm(newRecordGiven == newRecord, "{} vs {} (old: {})",
+				description(records, newSubmissionGiven, newRecordGiven.get(), newCommandGiven),
+				description(records, newSubmission, newRecord.get(), newCommand),
+				description(frame_, submission_, record_.get(), command_));
+
+			for(auto& m : frameMatch.matches) {
+				dlg_info(">> {} - {}", description(frame_, m.a), description(records, m.b));
+			}
+		}
 		newRecord = newRecordGiven;
 	}
 
@@ -916,6 +1015,8 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	newOpenRecords.clear();
 	newOpenSections.clear();
 	transitionedSections.clear();
+	tmp_.transitionedRecords.clear();
+	tmp_.transitionedSubmissions.clear();
 
 	if(freezeOnSparseBind_) {
 		for(auto& subm : frame_) {
@@ -927,13 +1028,14 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 }
 
 void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records,
+		u32 newSubmissionID,
 		IntrusivePtr<CommandRecord> newRecord,
 		std::vector<const Command*> newCommand) {
 	// update records
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
 	auto frameMatch = match(tms, localMatchMem, defaultMatchType_, frame_, records);
-	updateRecords(frameMatch, std::move(records),
+	updateRecords(frameMatch, std::move(records), newSubmissionID,
 		std::move(newRecord), std::move(newCommand));
 }
 
@@ -996,7 +1098,9 @@ void CommandRecordGui::updateFromSelector() {
 	if(selector_.updateMode() == UpdateMode::swapchain) {
 		auto frameSpan = selector_.frame();
 		updateRecords(asVector(selector_.frame()),
-			selector_.record(), asVector(selector_.command()));
+			selector_.submission() ? selector_.submission()->submissionID : 0,
+			selector_.record(),
+			asVector(selector_.command()));
 
 		// TODO: already done in updateRecords, I guess we don't need this
 		// here right?
@@ -1406,7 +1510,7 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	// 	}
 	// }
 
-	updateRecords(frameMatch, std::move(frame), {}, {});
+	updateRecords(frameMatch, std::move(frame), {}, {}, {});
 
 	// also update the selector
 	auto submID = 0u;

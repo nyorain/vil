@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <command/record.hpp>
+#include <command/match.hpp>
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
@@ -55,11 +56,13 @@ private:
 	// When the given newRecord is empty, will try to find it in the frame.
 	// When the given newCommand is empty, will try to find it in the record.
 	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&,
+		u32 submissionID,
 		IntrusivePtr<CommandRecord> newRecord,
 		std::vector<const Command*> newCommand);
 
 	// Helper for the function above, will perform a full frame match.
 	void updateRecords(std::vector<FrameSubmission>,
+		u32 submissionID,
 		IntrusivePtr<CommandRecord> newRecord,
 		std::vector<const Command*> newCommand);
 
@@ -101,7 +104,10 @@ private:
 		std::unordered_set<const ParentCommand*> openedSections;
 		std::unordered_set<const FrameSubmission*> openedSubmissions;
 		std::unordered_set<const CommandRecord*> openedRecords;
+
 		std::unordered_set<const ParentCommand*> transitionedSections;
+		std::unordered_set<const FrameSubmission*> transitionedSubmissions;
+		std::unordered_set<const CommandRecord*> transitionedRecords;
 	} tmp_;
 
 	// The commands to display

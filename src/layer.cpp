@@ -451,9 +451,12 @@ struct HookedFunction {
 	PFN_vkVoidFunction func {};
 	bool device {}; // device-level function
 	u32 version {}; // required vulkan version
+	// The extension string can contain multiple extensions separated by '|'
 	// TODO: we never need both fields i guess, just merge them into 'ext'?
 	std::string_view iniExt {}; // name of extension that has to be enabled
 	std::string_view devExt {}; // name of extension that has to be enabled
+
+	std::string_view coreAlias {}; // when non-core func: alias name in core
 };
 
 // We make sure our hooked functions match the type required by vulkan
@@ -477,16 +480,16 @@ struct HookedFunction {
 }()
 
 #define VIL_INI_HOOK(fn, ver) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), ver, {}}}
-#define VIL_INI_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), VK_VERSION_1_0, ext}}
+#define VIL_INI_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), VK_API_VERSION_1_0, ext}}
 
 #define VIL_DEV_HOOK(fn, ver) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), ver, {}, {}}}
-#define VIL_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), VK_VERSION_1_0, {}, ext}}
-#define VIL_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_VERSION_1_0, {}, ext}}
+#define VIL_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), VK_API_VERSION_1_0, {}, ext}}
+#define VIL_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_API_VERSION_1_0, {}, ext}}
 
-// NOTE: not sure about these, it seems applications can use KHR functions without
-// enabling the extension when the function is in core? The vulkan samples do this
-// at least. So we return them as well.
-#define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_VERSION_1_0, {}, {}}}
+// NOTE: extension functions that were promoted to core can be used if either:
+// - their extension is enabled
+// - the respective core version is used.
+#define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_API_VERSION_1_0, {}, ext, "vk" # alias}}
 
 static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 		std::initializer_list<std::pair<const std::string_view, HookedFunction>>{
@@ -516,6 +519,9 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(QueuePresentKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetSwapchainImagesKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 
+	VIL_DEV_HOOK_EXT(WaitForPresentKHR, VK_KHR_PRESENT_WAIT_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(WaitForPresent2KHR, VK_KHR_PRESENT_WAIT_2_EXTENSION_NAME),
+
 	// handle.hpp
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectNameEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
@@ -532,7 +538,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 #ifdef VIL_WITH_WIN32
 	// We do everything to not include the platform-specific header
 	// VIL_INI_HOOK_EXT(CreateWin32SurfaceKHR, VK_KHR_WIN32_SURFACE_EXTENSION_NAME),
-	{"vkCreateWin32SurfaceKHR", HookedFunction{(PFN_vkVoidFunction) CreateWin32SurfaceKHR, false, VK_VERSION_1_0, "VK_KHR_win32_surface"}},
+	{"vkCreateWin32SurfaceKHR", HookedFunction{(PFN_vkVoidFunction) CreateWin32SurfaceKHR, false, VK_API_VERSION_1_0, "VK_KHR_win32_surface"}},
 #endif // VIL_WITH_WIN32
 
 	VIL_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
@@ -564,7 +570,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 		GetImageSubresourceLayout2, VK_KHR_MAINTENANCE_5_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(GetImageSubresourceLayout2EXT,
 		GetImageSubresourceLayout2,
-		VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME | VK_EXT_IMAGE_COMPRESSION_CONTROL_EXTENSION_NAME),
+		VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME "|" VK_EXT_IMAGE_COMPRESSION_CONTROL_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(GetImageMemoryRequirements2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(GetImageMemoryRequirements2KHR, GetImageMemoryRequirements2,
@@ -615,10 +621,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(InvalidateMappedMemoryRanges, VK_API_VERSION_1_0),
 	VIL_DEV_HOOK(GetDeviceMemoryCommitment, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(MapMemory2, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(MapMemory2, VK_API_VERSION_1_4),
 	VIL_DEV_HOOK_ALIAS_CORE(MapMemory2KHR, MapMemory2,
 		VK_KHR_MAP_MEMORY_2_EXTENSION_NAME),
-	VIL_DEV_HOOK(UnmapMemory2, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(UnmapMemory2, VK_API_VERSION_1_4),
 	VIL_DEV_HOOK_ALIAS_CORE(UnmapMemory2KHR, UnmapMemory2,
 		VK_KHR_MAP_MEMORY_2_EXTENSION_NAME),
 
@@ -701,6 +707,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CreateRayTracingPipelinesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetRayTracingCaptureReplayShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
 	// cb.hpp
@@ -999,6 +1006,17 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetLineStippleEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetDepthClipNegativeOneToOneEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME),
 
+	// VK_EXT_transform_feedback
+	VIL_DEV_HOOK_EXT(CmdBindTransformFeedbackBuffersEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBeginTransformFeedbackEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdEndTransformFeedbackEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBeginQueryIndexedEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdEndQueryIndexedEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdDrawIndirectByteCountEXT, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME),
+
+	// VK_EXT_depth_bias_control
+	VIL_DEV_HOOK_EXT(CmdSetDepthBias2EXT, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME),
+
 	// For dlss testing.
 	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
@@ -1153,6 +1171,8 @@ bool deviceExtensionEnablesOther(std::string_view ext1, std::string_view ext2) {
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
+	dlg_trace("device proc lookup {}", funcName);
+
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
 		// If it's not hooked, just forward it to the next chain link
@@ -1182,20 +1202,52 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	}
 
 	if(!hook.devExt.empty()) {
+		auto exts = hook.devExt;
 		auto found = false;
-		for(auto& ext : dev->appExts) {
-			if(ext == hook.devExt || deviceExtensionEnablesOther(ext, hook.devExt)) {
-				found = true;
+
+		while(!found) {
+			auto limit = exts.find_first_of('|');
+			dlg_assert(limit != 0);
+			auto funcExt = exts.substr(0, limit);
+
+			for(auto& ext : dev->appExts) {
+				if(ext == hook.devExt || deviceExtensionEnablesOther(ext, funcExt)) {
+					dlg_trace(">> ext {} found", funcExt);
+					found = true;
+					break;
+				}
+			}
+
+			if(limit == exts.npos) {
 				break;
 			}
+
+			dlg_assert(limit + 1 < exts.size());
+			exts = exts.substr(limit + 1);
 		}
 
 		if(!found) {
+			// return it if the function is already in core (without suffix)
+			if(!hook.coreAlias.empty()) {
+				auto it = funcPtrTable.find(std::string_view(hook.coreAlias));
+				dlg_assert(it != funcPtrTable.end());
+				if(it != funcPtrTable.end()) {
+					auto& aliasHook = it->second;
+					if(dev->ini->app.apiVersion < aliasHook.version) {
+						dlg_assert(hook.func == aliasHook.func);
+						dlg_trace(">> found as {} in core", hook.coreAlias);
+						return hook.func;
+					}
+				}
+			}
+
+			dlg_trace(">> ext {} not found", hook.devExt);
 			return nullptr;
 		}
 	}
 
 	// TODO: consider device version?
+	dlg_trace(">> version: app {} vs required {}", dev->ini->app.apiVersion, hook.version);
 	if(dev->ini->app.apiVersion < hook.version) {
 		return nullptr;
 	}

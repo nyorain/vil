@@ -183,6 +183,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSurfaceKHR*                               pSurface) {
 	auto& ini = getData<Instance>(instance);
+	ini.hasSurface.store(true);
 	auto res = ini.dispatch.CreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -205,6 +206,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSurfaceKHR*                               pSurface) {
 	auto& ini = getData<Instance>(instance);
+	ini.hasSurface.store(true);
 	auto res = ini.dispatch.CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
 		return res;

@@ -175,7 +175,6 @@ low prio:
 			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
 		  (3) if nothing else works, fall back to our old terrible
 		       copy to vec4[]-storage buffer solution?
-<<<<<<< HEAD
 - [x] full commandbuffer/record timings.
 	- [x] for this we need proper prefix-matching support in CommandHook. WIP
 	- [ ] also full batch timings?
@@ -213,8 +212,6 @@ low prio:
 - [ ] Would be useful to have the side-by-side-frames-with-vizlcs
 	  debug view via record serialization (among other things).
 	  {for later}
-=======
->>>>>>> 1dbd66b (Continue vertex viewer)
 
 - look into found doom performance hotpaths
 	- Improve QueuePresent timing

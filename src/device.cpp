@@ -255,6 +255,22 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 	}
 
 	// check if required extensions happen to be supported
+#if defined(SWA_WITH_X11)
+	if(!contains(ini.extensions, VK_KHR_SURFACE_EXTENSION_NAME)) {
+		dlg_warn("Can't create window since extension {} was not enabled",
+			VK_KHR_SURFACE_EXTENSION_NAME);
+		return {};
+	}
+
+	auto hasXlib = contains(ini.extensions, VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+	auto hasXcb = contains(ini.extensions, VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+	auto hasWayland = contains(ini.extensions, "VK_KHR_wayland_surface");
+
+	if(!hasXlib && !hasXcb && !hasWayland) {
+		dlg_warn("Can't create window since xcb/xlib/wl surface ext not enabled");
+		return {};
+	}
+#else // defined(SWA_WITH_X11)
 	unsigned nexts;
 	auto* exts = swa_display_vk_extensions(window->dpy, &nexts);
 
@@ -266,6 +282,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 			return {};
 		}
 	}
+#endif // defined(SWA_WITH_X11)
 
 	// If swapchain extension wasn't enabled, enable it.
 	auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -841,6 +858,8 @@ VkResult doCreateDevice(
 	dev.enabledFeatures11 = features11;
 	dev.enabledFeatures12 = features12;
 	dev.enabledFeatures13 = features13;
+
+	dev.windowWaitForSurface = checkEnvBinary("VIL_WAIT_SURFACE", false);
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 
@@ -1496,7 +1515,9 @@ VkFormat findDepthFormat(const Device& dev) {
 // this. We now have to make sure to make it later on.
 void checkInitWindow(Device& dev) {
 #ifdef VIL_WITH_SWA
-	if(dev.window && !dev.window->dev) {
+	// Wait until a surface has been created
+	bool hasSurface = !dev.windowWaitForSurface || dev.ini->hasSurface.load();
+	if(dev.window && hasSurface && !dev.window->dev) {
 		dev.window->createWindow(*dev.ini);
 		dev.window->initDevice(dev);
 	}

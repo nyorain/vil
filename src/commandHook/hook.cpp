@@ -1037,6 +1037,27 @@ std::vector<CompletedHook> CommandHook::moveCompleted() {
 	{
 		std::lock_guard lock(dev_->mutex);
 		moved = std::move(this->completed_);
+
+		// swapchain mode: make sure to only return completed hooks
+		// for frames that were already presented
+		// TODO: would be nice to show non-finished as well?
+		//  But then we probably have to decouple this more from the shown
+		//  commands, we also want to show the full frame, not just
+		//  partial state
+		if(target_.type == CommandHookTargetType::inFrame) {
+			auto swapchain = dev_->swapchainPtrLocked();
+			dlg_assert(swapchain);
+
+			while(swapchain && !moved.empty()) {
+				auto& last = moved.back();
+				if(last.submissionID <= swapchain->frameSubmissions[0].submissionEnd) {
+					break;
+				}
+
+				completed_.push_back(std::move(moved.back()));
+				moved.pop_back();
+			}
+		}
 	}
 	return moved;
 }

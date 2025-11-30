@@ -290,13 +290,18 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory2(
 		VkDevice                                    device,
 		const VkMemoryMapInfo*                      pMemoryMapInfo,
 		void**                                      ppData) {
+	dlg_trace("MapMemory2");
+
 	auto& mem = get(device, pMemoryMapInfo->memory);
 
 	auto infoCopy = *pMemoryMapInfo;
 	infoCopy.memory = mem.handle;
 
+	dlg_trace(">> pre-call {} {}", (void*) mem.handle, (void*) mem.dev->dispatch.MapMemory2);
 	auto res = mem.dev->dispatch.MapMemory2(mem.dev->handle, &infoCopy, ppData);
+	dlg_trace(">> call {}", res);
 	if(res != VK_SUCCESS) {
+		dlg_trace(">> forward {}", res);
 		return res;
 	}
 
@@ -306,6 +311,7 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory2(
 	mem.mapOffset = infoCopy.offset;
 	mem.mapSize = infoCopy.size;
 
+	dlg_trace(">> return {}", res);
 	return res;
 }
 

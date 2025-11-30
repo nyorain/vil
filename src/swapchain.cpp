@@ -375,10 +375,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
+		const auto supportedExts = {
+			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT,
+			VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
+		};
 		dlg_check({
 			auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
 			while (it) {
-				dlg_warn("unhandled queue present pNext {}", it->sType);
+				if(!contains(supportedExts, it->sType)) {
+					dlg_warn("unhandled queue present pNext {}", it->sType);
+				}
 				it = it->pNext;
 			}
 		});
@@ -475,6 +481,27 @@ VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(
 	}
 
 	return res;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL WaitForPresentKHR(
+		VkDevice                                    device,
+		VkSwapchainKHR                              vkSwapchain,
+		uint64_t                                    presentId,
+		uint64_t                                    timeout) {
+	auto& swapchain = get(device, vkSwapchain);
+	auto& dev = *swapchain.dev;
+	return dev.dispatch.WaitForPresentKHR(dev.handle, swapchain.handle,
+		presentId, timeout);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL WaitForPresent2KHR(
+		VkDevice                                    device,
+		VkSwapchainKHR                              vkSwapchain,
+		const VkPresentWait2InfoKHR*                pPresentWait2Info) {
+	auto& swapchain = get(device, vkSwapchain);
+	auto& dev = *swapchain.dev;
+	return dev.dispatch.WaitForPresent2KHR(dev.handle, swapchain.handle,
+		pPresentWait2Info);
 }
 
 FrameSubmission::FrameSubmission() = default;

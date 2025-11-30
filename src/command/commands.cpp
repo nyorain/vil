@@ -41,6 +41,18 @@ auto rawHandles(ThreadMemScope& scope, const C& handles) {
 	return ret;
 }
 
+auto displayPNext(const void* pNext) {
+	auto pn = static_cast<const VkBaseInStructure*>(pNext);
+	if(pn) {
+		ImGui::CollapsingHeader("Extensions");
+
+		while(pn) {
+			imGuiText("{}", vk::name(pn->sType));
+			pn = pn->pNext;
+		}
+	}
+}
+
 // ArgumentsDesc
 NameResult nameRes(Handle* handle, VkObjectType objectType,
 		NullName nullName, bool displayType) {
@@ -197,6 +209,8 @@ void displayBarriers(
 			imGuiText("srcAccess: {}", vk::nameAccessFlags2(memb.srcAccessMask));
 			imGuiText("dstAccess: {}", vk::nameAccessFlags2(memb.dstAccessMask));
 
+			displayPNext(memb.pNext);
+
 			ImGui::Separator();
 		}
 		ImGui::Unindent();
@@ -221,6 +235,9 @@ void displayBarriers(
 			imGuiText("dstAccess: {}", vk::nameAccessFlagBits2(bufb.dstAccessMask));
 			imGuiText("srcQueueFamily: {}", formatQueueFam(bufb.srcQueueFamilyIndex));
 			imGuiText("dstQueueFamily: {}", formatQueueFam(bufb.dstQueueFamilyIndex));
+
+			displayPNext(bufb.pNext);
+
 			ImGui::Separator();
 		}
 		ImGui::Unindent();
@@ -251,6 +268,9 @@ void displayBarriers(
 			imGuiText("newLayout: {}", vk::name(imgb.newLayout));
 			imGuiText("srcQueueFamily: {}", formatQueueFam(imgb.srcQueueFamilyIndex));
 			imGuiText("dstQueueFamily: {}", formatQueueFam(imgb.dstQueueFamilyIndex));
+
+			displayPNext(imgb.pNext);
+
 			ImGui::Separator();
 		}
 		ImGui::Unindent();
@@ -334,6 +354,8 @@ BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
 void Barrier2CmdBase::displayInspector(Gui& gui) const {
 	displayBarriers(gui, images, buffers,
 		imgBarriers, bufBarriers, memBarriers);
+
+	displayPNext(pNext);
 }
 
 VkDependencyInfo Barrier2CmdBase::patchedBarriers(
@@ -364,6 +386,7 @@ VkDependencyInfo Barrier2CmdBase::patchedBarriers(
 	VkDependencyInfo ret {};
 	ret.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 	ret.dependencyFlags = flags;
+	ret.pNext = pNext;
 	ret.bufferMemoryBarrierCount = bufbPatched.size();
 	ret.pBufferMemoryBarriers = bufbPatched.data();
 	ret.imageMemoryBarrierCount = imgbPatched.size();
@@ -922,15 +945,33 @@ void DrawMeshTasksIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb
 void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	std::vector<VkBuffer> vkbuffers;
 	std::vector<VkDeviceSize> vkoffsets;
+	std::vector<VkDeviceSize> vksizes;
+	std::vector<VkDeviceSize> vkstrides;
 	vkbuffers.reserve(buffers.size());
 	vkoffsets.reserve(buffers.size());
 	for(auto& b : buffers) {
 		vkbuffers.push_back(b.buffer ? b.buffer->handle : VK_NULL_HANDLE);
 		vkoffsets.push_back(b.offset);
+
+		if(v2 && strides) {
+			vkstrides.push_back(b.stride);
+		}
+
+		if(v2 && sizes) {
+			vksizes.push_back(b.size);
+		}
 	}
 
-	dev.dispatch.CmdBindVertexBuffers(cb, firstBinding,
-		u32(vkbuffers.size()), vkbuffers.data(), vkoffsets.data());
+	if(v2) {
+		dlg_assert(dev.dispatch.CmdBindVertexBuffers2);
+		dev.dispatch.CmdBindVertexBuffers2(cb, firstBinding,
+			u32(vkbuffers.size()), vkbuffers.data(), vkoffsets.data(),
+			vksizes.data(), vkstrides.data());
+	} else {
+		dlg_assert(!strides && !sizes);
+		dev.dispatch.CmdBindVertexBuffers(cb, firstBinding,
+			u32(vkbuffers.size()), vkbuffers.data(), vkoffsets.data());
+	}
 }
 
 std::string BindVertexBuffersCmd::toString() const {
@@ -2295,6 +2336,18 @@ void SetLineStippleEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32)
 
 void SetDepthClipNegativeOneToOneEXTCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthClipNegativeOneToOneEXT(cb, enable);
+}
+
+// VK_EXT_depth_bias_control
+void SetDepthBias2Cmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	VkDepthBiasInfoEXT info {};
+	info.sType = VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT;
+	info.pNext = pNext;
+	info.depthBiasClamp = depthBiasClamp;
+	info.depthBiasConstantFactor = depthBiasConstantFactor;
+	info.depthBiasSlopeFactor = depthBiasSlopeFactor;
+
+	dev.dispatch.CmdSetDepthBias2EXT(cb, &info);
 }
 
 // util

@@ -117,6 +117,11 @@ struct Device {
 	std::atomic<bool> printVertexCaptureTimings {};
 	std::atomic<bool> printVertexCaptureMetadata {};
 
+	// Whether we wait with window creation until the application has
+	// created a window. Can be disabled via environment variable.
+	// Needed for Proton/DXVK, I don't know why.
+	bool windowWaitForSurface {false};
+
 	// Aside from properties, only the families used by device
 	// are initialized.
 	std::vector<QueueFamily> queueFamilies;
@@ -133,7 +138,8 @@ struct Device {
 	// managed here so we don't have multiple pools per family index).
 	std::vector<u32> usedQueueFamilyIndices;
 	// Global submission counter - counts for all queues.
-	// Is increased for every VkQueueSubmit call.
+	// Is increased for every VkQueueSubmit call (pre-increment).
+	// Contains the counter of the last submission done.
 	std::atomic<u64> submissionCounter {0u};
 
 	// The queue we use for graphics submissions. Can be assumed to

@@ -7,6 +7,7 @@
 #include <vk/dispatch_table.h>
 #include <string>
 #include <vector>
+#include <atomic>
 
 struct swa_display;
 
@@ -16,6 +17,8 @@ struct Instance {
 	VkLayerInstanceDispatchTable dispatch;
 	VkInstance handle {};
 	PFN_vkSetInstanceLoaderData setInstanceLoaderData {};
+
+	std::atomic<bool> hasSurface {};
 
 	struct {
 		bool valid {};

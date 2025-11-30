@@ -1016,9 +1016,8 @@ void CommandViewer::displayDs(Draw& draw) {
 		if(needsImageView(dsType)) {
 			// general info
 			auto& elem = images(dsState, bindingID)[elemID];
-			dlg_assert(elem.imageView);
+			dlg_assertm_or(elem.imageView, return, "dsType {}", vk::name(dsType));
 
-			auto& imgView = *elem.imageView;
 			// refButton(gui, imgView);
 
 			// ImGui::SameLine();
@@ -1027,7 +1026,9 @@ void CommandViewer::displayDs(Draw& draw) {
 			// imgView.img can be null if the image was destroyed. This isn't
 			// too unlikely since we might have kept the imgView alive since it's
 			// still referenced in our DescriptorState
-			if(imgView.img) {
+			if(elem.imageView && elem.imageView->img) {
+				auto& imgView = *elem.imageView;
+
 				// imGuiText("Format: {}", vk::name(imgView.ci.format));
 				// auto& extent = imgView.img->ci.extent;
 				// imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
