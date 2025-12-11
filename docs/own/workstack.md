@@ -1,5 +1,12 @@
+- [ ] when VIL_SKIP_EXT_CHECK is set (or other env var?) override supported
+      extensions in that function. Investigate how to make this work.
+	  Can be provided in layer manifest or something?
+
+- [ ] implement VK_KHR_dynamic_rendering_local_read for core 1.4
+- [ ] impement VK_KHR_pipeline_executable_properties
 - [ ] fix invalid pipeline barrier with BeginRendering (test e.g. with iro gpuDebugDraw)
 - [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
+- [ ] copyChain: add functions for proper deep copying
 
 - [ ] Format weird for (RW)ByteAddressBuffers in hlsl/slang
 	- [ ] in that case, allow to explicitly specify the format to be printed.

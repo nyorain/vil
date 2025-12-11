@@ -350,6 +350,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		}
 
 		// extensions
+		// For the most part, we just hope the pNext chain does not need
+		// any patching.
+		pipe.exts = copyChain(pci.pNext);
+
 		auto* glibInfo = findChainInfo<VkGraphicsPipelineLibraryCreateInfoEXT,
 			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT>(pci);
 		if(glibInfo) {
@@ -419,6 +423,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.stage = PipelineShaderStage(dev, pCreateInfos[i].stage);
 		pipe.flags = pCreateInfos[i].flags;
+		pipe.exts = copyChain(pCreateInfos[i].pNext);
+
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
@@ -736,6 +742,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		pipe.layout = getPtr(dev, ci.layout);
 		pipe.maxPipelineRayRecursionDepth = ci.maxPipelineRayRecursionDepth;
 		pipe.flags = ci.flags;
+		pipe.exts = copyChain(pCreateInfos[i].pNext);
 
 		// TODO: support, for shader patching
 		dlg_assertm(!ci.pLibraryInfo, "not supported");

@@ -46,6 +46,8 @@ Environment variables
   and counting the number of warnings errors. On windows, will allocate
   a console window to output to.
   Note that internal logs/asserts are disabled in release builds.
+- `VIL_LOG_FILE` can be set to a file path where vil will output its
+  log messages. By default, will simply output to stdout.
 
 - `VIL_WINDOW_MIN_FRAME_TIME=<time in ms>` when a window was created
   via `VIL_CREATE_WINDOW`, will throttle its framerate (if needed) to make
@@ -56,3 +58,10 @@ Environment variables
 - `VIL_WAIT_SURFACE={0, 1}`, default 0. Wait until the application has created
   a surface object until the window is initialized. Fixes window initialization
   for DXVK. If you have a compute-only application, this needs to be 0.
+
+- `VIL_ALLOW_UNSUPPORTED_EXTS={0, 1}`, default 0. When a vulkan instance/device
+  is created with an unsupported extension, vil will output and return an error
+  if this is not set to 1. If this is set to 1, vil still outputs an error
+  but does not fail device/instance creation.
+  Please note that running vil with unsupported extensions will likely
+  cause crashes and issues.

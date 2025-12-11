@@ -17,6 +17,7 @@
 #include <overlay.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <exts.hpp>
 #include <gencmd.hpp>
 #include <util/util.hpp>
 #include <util/export.hpp>
@@ -47,6 +48,7 @@ namespace vil {
 static auto dlgWarnErrorCount = 0u;
 static auto breakOnError = false;
 static auto dlgMinLevel = dlg_level_trace;
+static std::FILE* dlgLogFile {};
 
 // TODO: doesn't belong here
 std::mutex ThreadContext::mutex_;
@@ -62,7 +64,8 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		return;
 	}
 
-	dlg_default_output(origin, string, data);
+	(void) data;
+	dlg_default_output(origin, string, dlgLogFile);
 
 	if(origin->level >= dlg_level_warn) {
 		++dlgWarnErrorCount;
@@ -186,6 +189,15 @@ VkResult doCreateInstance(
 			else if(std::strcmp(minLevel, "warn")) dlgMinLevel = dlg_level_warn;
 			else if(std::strcmp(minLevel, "error")) dlgMinLevel = dlg_level_error;
 			else dlg_error("Invalid value for VIL_MIN_LOG_LEVEL: {}", minLevel);
+		}
+
+		if(const char* logFileStr = std::getenv("VIL_LOG_FILE"); logFileStr) {
+			if (dlgLogFile) {
+				std::fclose(dlgLogFile);
+			}
+
+			dlgLogFile = std::fopen(logFileStr, "w");
+			dlg_assert(dlgLogFile);
 		}
 
 		dlg_set_handler(dlgHandler, nullptr);
@@ -313,6 +325,29 @@ VkResult doCreateInstance(
 	auto extsBegin = ci->ppEnabledExtensionNames;
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 	ini.extensions = {extsBegin, extsEnd};
+
+	constexpr auto checkExts = true;
+	const auto allowUnsupported = checkEnvBinary("VIL_ALLOW_UNSUPPORTED_EXTS", false);
+	if(checkExts) {
+		for(std::string_view ext : ini.extensions) {
+			if(contains(unsupportedInstanceExts, ext)) {
+				auto str = dlg::format("Application requested device extension '{}' that is "
+					"explicitly not supported by vil", ext);
+
+				if (!allowUnsupported) {
+					dlg_error("{}.\nYou can run again with env variable VIL_ALLOW_UNSUPPORTED_EXTS=1 to try anyways", str);
+					return VK_ERROR_EXTENSION_NOT_PRESENT;
+				}
+
+				dlg_error("{}", str);
+			}
+
+			if(!contains(supportedInstanceExts, ext)) {
+				dlg_error("Application requested unknown device extension '{}'", ext);
+			}
+		}
+	}
+
 
 	auto debugUtilsName = std::string_view(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	ini.debugUtilsEnabled = (std::find(extsBegin, extsEnd, debugUtilsName) != extsEnd);
@@ -627,6 +662,9 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(UnmapMemory2, VK_API_VERSION_1_4),
 	VIL_DEV_HOOK_ALIAS_CORE(UnmapMemory2KHR, UnmapMemory2,
 		VK_KHR_MAP_MEMORY_2_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(SetDeviceMemoryPriorityEXT,
+		VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME),
 
 	// shader.hpp
 	VIL_DEV_HOOK(CreateShaderModule, VK_API_VERSION_1_0),

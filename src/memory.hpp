@@ -93,6 +93,7 @@ struct DeviceMemory : SharedDeviceHandle {
 
 	u32 typeIndex {};
 	VkDeviceSize size {};
+	float priority {}; // VK_EXT_pageable_device_local_memory
 
 	// Describes the current map state
 	void* map {}; // nullptr if not mapped
@@ -154,5 +155,11 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory2(
 VKAPI_ATTR VkResult VKAPI_CALL UnmapMemory2(
     VkDevice                                    device,
     const VkMemoryUnmapInfo*                    pMemoryUnmapInfo);
+
+// VK_EXT_pageable_device_local_memory
+VKAPI_ATTR void VKAPI_CALL SetDeviceMemoryPriorityEXT(
+    VkDevice                                    device,
+    VkDeviceMemory                              memory,
+    float                                       priority);
 
 } // namespace vil

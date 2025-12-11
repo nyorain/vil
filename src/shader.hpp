@@ -167,4 +167,6 @@ VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(
     size_t*                                     pDataSize,
     void*                                       pData);
 
+// VK_EXT_shader_module_identifier shouldn't need hooking (for now)
+
 } // namespace vil

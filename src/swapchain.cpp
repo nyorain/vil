@@ -378,6 +378,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		const auto supportedExts = {
 			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT,
 			VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
+			// NOTE: only works when fence is wrapped
+			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR,
 		};
 		dlg_check({
 			auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
