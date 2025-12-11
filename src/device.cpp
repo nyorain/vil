@@ -17,6 +17,7 @@
 #include <gencmd.hpp>
 #include <threadContext.hpp>
 #include <fault.hpp>
+#include <exts.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
@@ -370,8 +371,7 @@ VkResult doCreateDevice(
 
 	// copy the pNext chain so we can modify it.
 	std::unique_ptr<std::byte[]> copiedChain;
-	auto* pNext = copyChain(nci.pNext, copiedChain);
-	nci.pNext = pNext;
+	auto* pNext = copyChainPatch(nci.pNext, copiedChain);
 
 	// = Queues =
 	// Make sure we get a graphics queue.
@@ -423,27 +423,22 @@ VkResult doCreateDevice(
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 	std::vector<const char*> newExts = {extsBegin, extsEnd};
 
-	const auto unsupportedExts = std::set<std::string>{
-		// extensions that are not supported and will most likely cause crashes
-		"VK_NV_ray_tracing",
-		"VK_NV_shading_rate_image",
-		"VK_EXT_transform_feedback",
-		"VK_AMD_buffer_marker",
-		"VK_NV_device_diagnostic_checkpoints",
-		"VK_NV_scissor_exclusive",
-		"VK_NV_mesh_shader",
-		"VK_INTEL_performance_query",
-		"VK_NV_fragment_shading_rate_enums",
-		"VK_NV_device_generated_commands",
-	};
+	constexpr auto checkExts = true;
+	const auto allowUnsupported = checkEnvBinary("VIL_ALLOW_UNSUPPORTED_EXTS", false);
+	if(checkExts) {
+		for(std::string_view ext : newExts) {
+			if(contains(unsupportedDevExts, ext)) {
+				auto str = dlg::format("Application requested device extension '{}' that is "
+					"explicitly not supported by vil", ext);
 
-	constexpr auto checkForUnsupportedExts = true;
-	if(checkForUnsupportedExts && !checkEnvBinary("VIL_SKIP_EXT_CHECK", false)) {
-		for(auto& ext : newExts) {
-			if(unsupportedExts.find(ext) != unsupportedExts.end()) {
-				dlg_error("Application requested '{}' but extension is not supported by vil.\n"
-					"You can run again with env variable VIL_SKIP_EXT_CHECK=1 to try anyways", ext);
-				return VK_ERROR_EXTENSION_NOT_PRESENT;
+				if (!allowUnsupported) {
+					dlg_error("{}.\nYou can run again with env variable VIL_ALLOW_UNSUPPORTED_EXTS=1 to try anyways", str);
+					return VK_ERROR_EXTENSION_NOT_PRESENT;
+				}
+
+				dlg_error("{}", str);
+			} else if(!contains(supportedDevExts, ext)) {
+				dlg_error("Application requested unknown device extension '{}'", ext);
 			}
 		}
 	}

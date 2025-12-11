@@ -149,6 +149,24 @@ void DeviceMemory::onApiDestroy() {
 	allocations.clear();
 }
 
+// Calls the given callback for every resource overlapping the given
+// range of mem[off, off + size)
+template<typename F>
+void forEachOverlappingResourceLocked(const DeviceMemory& mem,
+		VkDeviceSize off, VkDeviceSize size, F&& callback) {
+	assertOwned(mem.dev->mutex);
+
+	MemoryBind tester {};
+	tester.memOffset = off;
+	tester.memory = const_cast<DeviceMemory*>(&mem);
+
+	auto end = off + size;
+	auto it = mem.allocations.lower_bound(&tester);
+	while(it != mem.allocations.end() && (*it)->memOffset < end) {
+		callback(**it);
+	}
+}
+
 // Memory
 VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		VkDevice                                    device,
@@ -334,22 +352,13 @@ VKAPI_ATTR VkResult VKAPI_CALL UnmapMemory2(
 	return mem.dev->dispatch.UnmapMemory2(mem.dev->handle, &infoCopy);
 }
 
-// Calls the given callback for every resource overlapping the given
-// range of mem[off, off + size)
-template<typename F>
-void forEachOverlappingResourceLocked(const DeviceMemory& mem,
-		VkDeviceSize off, VkDeviceSize size, F&& callback) {
-	assertOwned(mem.dev->mutex);
-
-	MemoryBind tester {};
-	tester.memOffset = off;
-	tester.memory = const_cast<DeviceMemory*>(&mem);
-
-	auto end = off + size;
-	auto it = mem.allocations.lower_bound(&tester);
-	while(it != mem.allocations.end() && (*it)->memOffset < end) {
-		callback(**it);
-	}
+VKAPI_ATTR void VKAPI_CALL SetDeviceMemoryPriorityEXT(
+		VkDevice                                    device,
+		VkDeviceMemory                              memory,
+		float                                       priority) {
+	auto& mem = get(device, memory);
+	mem.priority = priority;
+	mem.dev->dispatch.SetDeviceMemoryPriorityEXT(mem.dev->handle, mem.handle, priority);
 }
 
 } // namespace vil

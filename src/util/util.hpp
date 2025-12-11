@@ -98,7 +98,7 @@ auto find(C&& c, K&& k) {
 
 template<typename C, typename K>
 bool contains(C&& c, K&& k) {
-	return find(c, k) != c.end();
+	return find(c, k) != std::end(c);
 }
 
 template<typename C, typename F>
@@ -193,8 +193,14 @@ void* findChainInfo2(void* pNext) {
 	return nullptr;
 }
 
-std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
-void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
+std::unique_ptr<std::byte[]> copyChain(const void* pNext);
+inline std::unique_ptr<std::byte[]> copyChainPatch(const void*& pNext) {
+	auto ret = copyChain(pNext);
+	pNext = ret.get();
+	return ret;
+}
+
+void* copyChainPatch(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
 
 void* copyChainLocal(ThreadMemScope&, const void* pNext);
 

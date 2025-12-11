@@ -105,7 +105,7 @@ std::size_t structSize(VkStructureType type) {
 	return size;
 }
 
-std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
+std::unique_ptr<std::byte[]> copyChain(const void* pNext) {
 	if(!pNext) {
 		return {};
 	}
@@ -154,12 +154,12 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 	return buf;
 }
 
-void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
+void* copyChainPatch(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 	if(!pNext) {
 		return nullptr;
 	}
 
-	buf = copyChain(pNext);
+	buf = copyChainPatch(pNext);
 	return static_cast<void*>(buf.get());
 }
 

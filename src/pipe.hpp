@@ -96,6 +96,7 @@ struct GraphicsPipeline : Pipeline {
 	bool needsColorBlend : 1;
 
 	IntrusivePtr<XfbPatchDesc> xfbPatch; // valid when we injected xfb
+	std::unique_ptr<std::byte[]> exts; // copied pnext chain
 
 	VkGraphicsPipelineLibraryFlagsEXT libraryFlags {};
 
@@ -113,6 +114,7 @@ void fixPointers(GraphicsPipeline& pipe);
 
 struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
+	std::unique_ptr<std::byte[]> exts; // copied pnext chain
 };
 
 struct RayTracingPipeline : Pipeline {
@@ -130,6 +132,8 @@ struct RayTracingPipeline : Pipeline {
 	std::unordered_set<VkDynamicState> dynamicState;
 	std::vector<std::byte> groupHandles;
 	u32 maxPipelineRayRecursionDepth;
+
+	std::unique_ptr<std::byte[]> exts; // copied pnext chain
 };
 
 // API

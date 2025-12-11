@@ -6,7 +6,6 @@
 #include <vk/vulkan.h>
 #include <vector>
 #include <memory>
-#include <atomic>
 
 namespace vil {
 

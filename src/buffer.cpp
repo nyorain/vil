@@ -106,12 +106,6 @@ void retrieveDeviceAddress(Buffer& buf) {
 	dev.bufferAddresses.insert(&buf);
 }
 
-void checkDeviceAddress(Buffer& buf) {
-	if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-		retrieveDeviceAddress(buf);
-	}
-}
-
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		VkDevice                                    device,
@@ -158,11 +152,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 
 	if(buf.ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) {
 		buf.memory = SparseMemoryState{};
-
-		// for non-sparse buffer, the device address can only be retrieved when
-		// its bound to memory, but for non-sparse buffers it can be retrieved
-		// immediately
-		checkDeviceAddress(buf);
 	}
 
 	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
@@ -252,7 +241,6 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		return res;
 	}
 
-	checkDeviceAddress(buf);
 	return VK_SUCCESS;
 }
 
@@ -291,7 +279,6 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		auto& buf = get(dev, bind.buffer);
-		checkDeviceAddress(buf);
 	}
 
 	return VK_SUCCESS;
@@ -347,26 +334,20 @@ VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetBufferDeviceAddress(
 		VkDevice                                    device,
 		const VkBufferDeviceAddressInfo*            pInfo) {
 	auto& buf = get(device, pInfo->buffer);
-	dlg_assert(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
 
 	auto fwd = *pInfo;
 	fwd.buffer = buf.handle;
-	auto ret = buf.dev->dispatch.GetBufferDeviceAddressKHR(buf.dev->handle, &fwd);
+	auto ret = buf.dev->dispatch.GetBufferDeviceAddress(buf.dev->handle, &fwd);
 
-	// This is a sign of a serious problem, we might have missed to retrieve
-	// it at the right point. We try to insert it now, in the hope that
-	// this avoid further problems
 	if(ret != buf.deviceAddress) {
-		dlg_error("Inconsistent/Unknown device address retrieved");
+		// This is a sign of a serious problem.
+		dlg_assertm(!buf.deviceAddress, "Inconsistent/Unknown device address retrieved");
 
-		if(buf.deviceAddress) {
-			// We already retrieved a (different) device addres?!
-			// This makes no sense at all, we can't even try to fix the
-			// issue in this case.
-			dlg_error("Different device address retrieved?!");
-		} else {
-			retrieveDeviceAddress(buf);
-			dlg_assert(ret == buf.deviceAddress);
+		if (!buf.deviceAddress) {
+			auto& dev = *buf.dev;
+			std::lock_guard lock(dev.mutex);
+			buf.deviceAddress = ret;
+			dev.bufferAddresses.insert(&buf);
 		}
 	}
 
@@ -382,7 +363,7 @@ VKAPI_ATTR uint64_t VKAPI_CALL GetBufferOpaqueCaptureAddress(
 	auto& buf = get(device, pInfo->buffer);
 	auto fwd = *pInfo;
 	fwd.buffer = buf.handle;
-	return buf.dev->dispatch.GetBufferOpaqueCaptureAddressKHR(buf.dev->handle, &fwd);
+	return buf.dev->dispatch.GetBufferOpaqueCaptureAddress(buf.dev->handle, &fwd);
 }
 
 VKAPI_ATTR uint64_t VKAPI_CALL GetDeviceMemoryOpaqueCaptureAddress(
@@ -391,7 +372,7 @@ VKAPI_ATTR uint64_t VKAPI_CALL GetDeviceMemoryOpaqueCaptureAddress(
 	auto& mem = get(device, pInfo->memory);
 	auto fwd = *pInfo;
 	fwd.memory = mem.handle;
-	return mem.dev->dispatch.GetDeviceMemoryOpaqueCaptureAddressKHR(mem.dev->handle, &fwd);
+	return mem.dev->dispatch.GetDeviceMemoryOpaqueCaptureAddress(mem.dev->handle, &fwd);
 }
 
 } // namespace vil

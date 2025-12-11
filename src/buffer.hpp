@@ -16,7 +16,7 @@ struct Buffer : MemoryResource {
 	bool externalMemory {}; // whether it supports importing/exporting
 
 	std::vector<BufferView*> views;
-	VkDeviceAddress deviceAddress {}; // null if not available
+	VkDeviceAddress deviceAddress {}; // lazily retrieved when application does
 
 	~Buffer();
 	void onApiDestroy();

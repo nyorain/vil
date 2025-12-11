@@ -1313,6 +1313,7 @@ vku::Pipeline createPatchCopy(const GraphicsPipeline& src,
 	gpi.pStages = patchedStages.stages.data();
 	gpi.renderPass = src.renderPass->handle; // TODO: can this be destroyed?
 	gpi.subpass = src.subpass;
+	gpi.pNext = src.exts.get();
 
 	return vku::Pipeline(dev, gpi);
 }
@@ -1326,6 +1327,7 @@ vku::Pipeline createPatchCopy(const RayTracingPipeline& src,
 	rti.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
 	rti.layout = src.layout->handle;
 	rti.maxPipelineRayRecursionDepth = src.maxPipelineRayRecursionDepth;
+	rti.pNext = src.exts.get();
 
 	// TODO DATA RACE!
 	/*
