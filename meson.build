@@ -432,6 +432,7 @@ endif
 with_integration_tests = get_option('integration-tests')
 if with_integration_tests
 	src += files(
+		'src/test/bugged.cpp',
 		'src/test/integration/entry.cpp',
 		'src/test/integration/internal.cpp', # TODO: rename
 		'src/test/integration/gui.cpp',
