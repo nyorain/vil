@@ -449,8 +449,8 @@ int main() {
 	#define vilLoadSym(procName) *(void**) &(procName) = dlsym(handle, "vil_" #procName)
 #endif
 
-	PFN_vil_getErrorWarningCount getErrorWarningCount;
-	PFN_vil_runInternalIntegrationTets runInternalIntegrationTests;
+	PFN_vil_getErrorWarningCount getErrorWarningCount {};
+	PFN_vil_runInternalIntegrationTets runInternalIntegrationTests {};
 
 	vilLoadSym(getErrorWarningCount);
 	vilLoadSym(runInternalIntegrationTests);

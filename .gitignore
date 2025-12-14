@@ -9,3 +9,5 @@ docs/traces/
 .vs/
 .cache
 .vimspector.json
+subprojects/.wraplock
+subprojects/pml.wrap
