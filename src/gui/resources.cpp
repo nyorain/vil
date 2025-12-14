@@ -566,10 +566,11 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	for(auto b = 0u; b < ds.layout->bindings.size(); ++b) {
 		auto& layout = ds.layout->bindings[b];
 
-		auto print = [&](VkDescriptorType type, unsigned b, unsigned e) {
+		auto print = [&](unsigned b, unsigned e) {
+			auto type = descriptorType(state, b, e);
 			switch(category(type)) {
 				case DescriptorCategory::image: {
-					auto& binding = images(state, b)[e];
+					auto& binding = dsImage(state, b, e);
 					bool append = false;
 					if(needsImageView(type)) {
 						if(append) {
@@ -594,17 +595,17 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 					}
 					break;
 				} case DescriptorCategory::buffer: {
-					auto& binding = buffers(state, b)[e];
+					auto& binding = dsBuffer(state, b, e);
 					refButtonD(*gui_, binding.buffer);
 					ImGui::SameLine();
 					drawOffsetSize(binding);
 					break;
 				} case DescriptorCategory::bufferView: {
-					auto& binding = bufferViews(state, b)[e];
+					auto& binding = dsBufferView(state, b, e);
 					refButtonD(*gui_, binding.bufferView);
 					break;
 				} case DescriptorCategory::accelStruct: {
-					auto& binding = accelStructs(state, b)[e];
+					auto& binding = dsAccelStruct(state, b, e);
 					refButtonD(*gui_, binding.accelStruct);
 					break;
 				} default:
@@ -623,7 +624,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 					imGuiText("{}: ", e);
 					ImGui::SameLine();
 
-					print(layout.descriptorType, b, e);
+					print(b, e);
 				}
 
 				ImGui::TreePop();
@@ -635,7 +636,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			ImGui::Indent();
 			ImGui::Indent();
 
-			print(layout.descriptorType, b, 0);
+			print(b, 0);
 
 			ImGui::Unindent();
 			ImGui::Unindent();

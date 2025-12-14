@@ -207,14 +207,22 @@ struct DescriptorStateRef {
 u32 descriptorCount(DescriptorStateRef, unsigned binding);
 u32 totalDescriptorCount(DescriptorStateRef);
 
+// Needed due to mutable descriptor types.
+VkDescriptorType descriptorType(DescriptorStateRef state, unsigned binding, unsigned elem);
+
 // NOTE: retrieving the span itself does not need to lock the state's
 // mutex. The caller must manually synchronize access to the bindings by locking
 // the state's mutex.
-span<BufferDescriptor> buffers(DescriptorStateRef, unsigned binding);
-span<ImageDescriptor> images(DescriptorStateRef, unsigned binding);
-span<BufferViewDescriptor> bufferViews(DescriptorStateRef, unsigned binding);
-span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
+// span<BufferDescriptor> buffers(DescriptorStateRef, unsigned binding);
+// span<ImageDescriptor> images(DescriptorStateRef, unsigned binding);
+// span<BufferViewDescriptor> bufferViews(DescriptorStateRef, unsigned binding);
+// span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
 span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
+
+BufferDescriptor& dsBuffer(DescriptorStateRef, unsigned binding, unsigned elem);
+ImageDescriptor& dsImage(DescriptorStateRef, unsigned binding, unsigned elem);
+BufferViewDescriptor& dsBufferView(DescriptorStateRef, unsigned binding, unsigned elem);
+AccelStructDescriptor& dsAccelStruct(DescriptorStateRef, unsigned binding, unsigned elem);
 
 // Returns whether the given descriptor state has the given handle bound.
 // For Buffers and Images, also returns true when one of their bufferViews/

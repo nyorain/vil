@@ -405,20 +405,35 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		dlg_assert(bind.image);
+
 		auto& img = get(dev, bind.image);
 
 		fwd[i] = bind;
 		fwd[i].image = img.handle;
 
 		// can be VK_NULL_HANDLE, e.g. for VkBindImageMemorySwapchainInfoKHR
-		if(bind.memory) {
-			auto& mem = get(dev, bind.memory);
-			bindImageMemory(img, mem, bind.memoryOffset);
+		if(fwd[i].memory) {
+			auto& mem = get(dev, fwd[i].memory);
 			fwd[i].memory = mem.handle;
 		}
 	}
 
-	return dev.dispatch.BindImageMemory2(dev.handle, u32(fwd.size()), fwd.data());
+	auto res = dev.dispatch.BindImageMemory2(dev.handle, u32(fwd.size()), fwd.data());
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	for(auto i = 0u; i < bindInfoCount; ++i) {
+		auto& bind = pBindInfos[i];
+		auto& img = get(dev, bind.image);
+
+		if(bind.memory) {
+			auto& mem = get(dev, bind.memory);
+			bindImageMemory(img, mem, bind.memoryOffset);
+		}
+	}
+
+	return res;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
@@ -428,9 +443,14 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		VkDeviceSize                                memoryOffset) {
 	auto& img = get(device, image);
 	auto& mem = get(device, memory);
-	bindImageMemory(img, mem, memoryOffset);
-	return img.dev->dispatch.BindImageMemory(img.dev->handle, img.handle,
+	auto res = img.dev->dispatch.BindImageMemory(img.dev->handle, img.handle,
 		mem.handle, memoryOffset);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	bindImageMemory(img, mem, memoryOffset);
+	return res;
 }
 
 // ImageView

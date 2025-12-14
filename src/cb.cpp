@@ -2520,10 +2520,10 @@ void handlePushDescriptor(CommandBuffer& cb, Command& cmd,
 				useHandle(cb, cmd, buf);
 
 				for(auto& dstState : descriptorStates) {
-					auto dstBuffers = buffers(dstState, write.dstBinding);
-					dstBuffers[write.dstArrayElement + i].buffer = &buf;
-					dstBuffers[write.dstArrayElement + i].offset = copies[i].offset;
-					dstBuffers[write.dstArrayElement + i].range = copies[i].range;
+					auto& dstBuffer = dsBuffer(dstState, write.dstBinding, write.dstArrayElement + i);
+					dstBuffer.buffer = &buf;
+					dstBuffer.offset = copies[i].offset;
+					dstBuffer.range = copies[i].range;
 				}
 			}
 			write.pBufferInfo = copies;
@@ -2549,10 +2549,10 @@ void handlePushDescriptor(CommandBuffer& cb, Command& cmd,
 				}
 
 				for(auto& dstState : descriptorStates) {
-					auto dstImages = images(dstState, write.dstBinding);
-					dstImages[write.dstArrayElement + i].imageView = iv;
-					dstImages[write.dstArrayElement + i].sampler = sampler;
-					dstImages[write.dstArrayElement + i].layout = copies[i].imageLayout;
+					auto& dstImage = dsImage(dstState, write.dstBinding, write.dstArrayElement + i);
+					dstImage.imageView = iv;
+					dstImage.sampler = sampler;
+					dstImage.layout = copies[i].imageLayout;
 				}
 			}
 			write.pImageInfo = copies;
@@ -2568,8 +2568,8 @@ void handlePushDescriptor(CommandBuffer& cb, Command& cmd,
 				useHandle(cb, cmd, bv);
 
 				for(auto& dstState : descriptorStates) {
-					auto dstBufViews = bufferViews(dstState, write.dstBinding);
-					dstBufViews[write.dstArrayElement + i].bufferView = &bv;
+					auto& dstBufViews = dsBufferView(dstState, write.dstBinding, write.dstArrayElement + i);
+					dstBufViews.bufferView = &bv;
 				}
 			}
 			write.pTexelBufferView = copies;
@@ -2590,8 +2590,8 @@ void handlePushDescriptor(CommandBuffer& cb, Command& cmd,
 				useHandle(cb, cmd, as);
 
 				for(auto& dstState : descriptorStates) {
-					auto dstAccelStructs = accelStructs(dstState, write.dstBinding);
-					dstAccelStructs[write.dstArrayElement + i].accelStruct = &as;
+					auto& dstAccelStruct = dsAccelStruct(dstState, write.dstBinding, write.dstArrayElement + i);
+					dstAccelStruct.accelStruct = &as;
 				}
 			}
 			accelStructWrite->pAccelerationStructures = copies;
@@ -4143,6 +4143,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBindTransformFeedbackBuffersEXT(
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets,
 		const VkDeviceSize*                         pSizes) {
+	(void) commandBuffer;
+	(void) firstBinding;
+	(void) bindingCount;
+	(void) pBuffers;
+	(void) pOffsets;
+	(void) pSizes;
 	dlg_error("unimplemented");
 }
 
@@ -4152,6 +4158,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginTransformFeedbackEXT(
 		uint32_t                                    counterBufferCount,
 		const VkBuffer*                             pCounterBuffers,
 		const VkDeviceSize*                         pCounterBufferOffsets) {
+	(void) commandBuffer;
+	(void) firstCounterBuffer;
+	(void) counterBufferCount;
+	(void) pCounterBuffers;
+	(void) pCounterBufferOffsets;
 	dlg_error("unimplemented");
 }
 
@@ -4161,6 +4172,11 @@ VKAPI_ATTR void VKAPI_CALL CmdEndTransformFeedbackEXT(
 		uint32_t                                    counterBufferCount,
 		const VkBuffer*                             pCounterBuffers,
 		const VkDeviceSize*                         pCounterBufferOffsets) {
+	(void) commandBuffer;
+	(void) firstCounterBuffer;
+	(void) counterBufferCount;
+	(void) pCounterBuffers;
+	(void) pCounterBufferOffsets;
 	dlg_error("unimplemented");
 }
 
@@ -4170,6 +4186,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginQueryIndexedEXT(
 		uint32_t                                    query,
 		VkQueryControlFlags                         flags,
 		uint32_t                                    index) {
+	(void) commandBuffer;
+	(void) queryPool;
+	(void) query;
+	(void) flags;
+	(void) index;
 	dlg_error("unimplemented");
 }
 
@@ -4178,6 +4199,10 @@ VKAPI_ATTR void VKAPI_CALL CmdEndQueryIndexedEXT(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query,
 		uint32_t                                    index) {
+	(void) commandBuffer;
+	(void) queryPool;
+	(void) query;
+	(void) index;
 	dlg_error("unimplemented");
 }
 
@@ -4189,6 +4214,13 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectByteCountEXT(
 		VkDeviceSize                                counterBufferOffset,
 		uint32_t                                    counterOffset,
 		uint32_t                                    vertexStride) {
+	(void) commandBuffer;
+	(void) instanceCount;
+	(void) firstInstance;
+	(void) counterBuffer;
+	(void) counterBufferOffset;
+	(void) counterOffset;
+	(void) vertexStride;
 	dlg_error("unimplemented");
 }
 

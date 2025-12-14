@@ -7,7 +7,7 @@ environment variable, it will significantly increase the chance that
 new extensions "just work", with a slight performance hit.
 See [env.md](env.md) for more details.
 
-For a list of supported/unsupported extensions, see [src/exts.hpp](src/exts.hpp).
+For a list of supported/unsupported extensions, see [exts.hpp](../src/exts.hpp).
 
 ## NOTES:
 - vendor-specific extensions are generally not a focus, unless someone

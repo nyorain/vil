@@ -86,14 +86,20 @@ bool copyableDescriptorSame(DescriptorStateRef a, DescriptorStateRef b,
 	dlg_assert(bindingID < a.layout->bindings.size());
 	dlg_assert(elemID < descriptorCount(a, bindingID));
 
-	auto& lbinding = a.layout->bindings[bindingID];
-	auto cat = category(lbinding.descriptorType);
+	auto aType = descriptorType(a, bindingID, elemID);
+	auto bType = descriptorType(b, bindingID, elemID);
+
+	if(aType != bType) {
+			return false;
+	}
+
+	auto cat = category(aType);
 	if(cat == DescriptorCategory::image) {
-		return images(a, bindingID)[elemID] == images(b, bindingID)[elemID];
+		return dsImage(a, bindingID, elemID) == dsImage(b, bindingID, elemID);
 	} else if(cat == DescriptorCategory::buffer) {
-		return buffers(a, bindingID)[elemID] == buffers(b, bindingID)[elemID];
+		return dsBuffer(a, bindingID, elemID) == dsBuffer(b, bindingID, elemID);
 	} else if(cat == DescriptorCategory::bufferView) {
-		return bufferViews(a, bindingID)[elemID] == bufferViews(b, bindingID)[elemID];
+		return dsBufferView(a, bindingID, elemID) == dsBufferView(b, bindingID, elemID);
 	} else if(cat == DescriptorCategory::accelStruct) {
 		// TODO: do we need to copy acceleration structues? Might be hard
 		// to do correctly; should use copy-on-write. Not sure if worth it at all.

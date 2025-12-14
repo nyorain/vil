@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <string_view>
 
 // Lists all supported/unsupported extensions.
@@ -348,6 +347,8 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_KHR_present_mode_fifo_latest_ready",
 	"VK_EXT_shader_64bit_indexing",
 	"VK_EXT_shader_uniform_buffer_unsized_array",
+	"VK_VALVE_mutable_descriptor_type",
+	"VK_EXT_mutable_descriptor_type", // TODO: push + mutable not supported right now
 };
 
 // Known/look like they might cause problems or crashes.
@@ -403,7 +404,6 @@ constexpr std::string_view unsupportedDevExts[] = {
 	"VK_NV_ray_tracing_motion_blur", // might work as nop?
 	"VK_EXT_image_compression_control", // image wrapped
 	"VK_NV_acquire_winrt_display",
-	"VK_VALVE_mutable_descriptor_type", // TODO
 	"VK_FUCHSIA_external_memory",
 	"VK_FUCHSIA_external_semaphore",
 	"VK_FUCHSIA_buffer_collection",
@@ -437,7 +437,6 @@ constexpr std::string_view unsupportedDevExts[] = {
 	"VK_QCOM_multiview_per_view_viewports",
 	"VK_NV_external_sci_sync2",
 	"VK_NV_cooperative_vector",
-	"VK_EXT_mutable_descriptor_type", // TODO
 	"VK_ARM_data_graph",
 	"VK_QCOM_multiview_per_view_render_areas",
 	"VK_KHR_video_decode_av1",

@@ -105,43 +105,49 @@ void bindPushDescriptors(Device& dev, VkCommandBuffer cb, VkPipelineBindPoint bb
 
 	ThreadMemScope tms;
 	auto writes = tms.alloc<VkWriteDescriptorSet>(dsLayout->bindings.size());
-	for(auto [i, bindingLayout] : enumerate(dsLayout->bindings)) {
-		auto& dst = writes[i];
+	for(auto [b, bindingLayout] : enumerate(dsLayout->bindings)) {
+		// TODO FIXME: would require rewrite of code below: first iterate
+		// over elements, then switch over descriptor type.
+		dlg_assertm(!(bindingLayout.descriptorType & VK_DESCRIPTOR_TYPE_MUTABLE_EXT),
+			"Mutable push descriptors not supported at the moment");
+
+		auto& dst = writes[b];
 
 		dst = {};
 		dst.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		dst.descriptorType = bindingLayout.descriptorType;
-		dst.dstBinding = i;
+		dst.dstBinding = b;
 		dst.descriptorCount = bindingLayout.descriptorCount;
 
 		switch(category(dst.descriptorType)) {
 			case DescriptorCategory::buffer: {
 				auto dstBufs = tms.alloc<VkDescriptorBufferInfo>(dst.descriptorCount);
-				auto srcBufs = buffers(dsData, i);
 				for(auto i = 0u; i < dst.descriptorCount; ++i) {
-					auto* buf = srcBufs[i].buffer; dstBufs[i].buffer = buf ? buf->handle : VK_NULL_HANDLE;
-					dstBufs[i].offset = srcBufs[i].offset;
-					dstBufs[i].range = srcBufs[i].range;
+					auto& srcBuf = dsBuffer(dsData, b, i);
+					auto* buf = srcBuf.buffer;
+					dstBufs[i].buffer = buf ? buf->handle : VK_NULL_HANDLE;
+					dstBufs[i].offset = srcBuf.offset;
+					dstBufs[i].range = srcBuf.range;
 				}
 				dst.pBufferInfo = dstBufs.data();
 				break;
 			} case DescriptorCategory::image: {
 				auto dstImages = tms.alloc<VkDescriptorImageInfo>(dst.descriptorCount);
-				auto srcImages = images(dsData, i);
 				for(auto i = 0u; i < dst.descriptorCount; ++i) {
-					auto* iv = srcImages[i].imageView;
-					auto* sampler = srcImages[i].sampler;
+					auto& srcImage = dsImage(dsData, b, i);
+					auto* iv = srcImage.imageView;
+					auto* sampler = srcImage.sampler;
 					dstImages[i].imageView = iv ? iv->handle : VK_NULL_HANDLE;
 					dstImages[i].sampler = sampler ? sampler->handle : VK_NULL_HANDLE;
-					dstImages[i].imageLayout = srcImages[i].layout;
+					dstImages[i].imageLayout = srcImage.layout;
 				}
 				dst.pImageInfo = dstImages.data();
 				break;
 			} case DescriptorCategory::bufferView: {
 				auto dstViews = tms.alloc<VkBufferView>(dst.descriptorCount);
-				auto srcViews = bufferViews(dsData, i);
 				for(auto i = 0u; i < dst.descriptorCount; ++i) {
-					auto* bv = srcViews[i].bufferView;
+					auto& srcView = dsBufferView(dsData, b, i);
+					auto* bv = srcView.bufferView;
 					dstViews[i] = bv ? bv->handle : VK_NULL_HANDLE;
 				}
 				dst.pTexelBufferView = dstViews.data();
@@ -151,9 +157,9 @@ void bindPushDescriptors(Device& dev, VkCommandBuffer cb, VkPipelineBindPoint bb
 				asWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
 
 				auto dstAS = tms.alloc<VkAccelerationStructureKHR>(dst.descriptorCount);
-				auto srcAS = accelStructs(dsData, i);
 				for(auto i = 0u; i < dst.descriptorCount; ++i) {
-					auto* as = srcAS[i].accelStruct;
+					auto& srcAS = dsAccelStruct(dsData, b, i);
+					auto* as = srcAS.accelStruct;
 					dstAS[i] = as ? as->handle : VK_NULL_HANDLE;
 				}
 
