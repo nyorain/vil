@@ -182,6 +182,10 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 	auto allocInfo = *pAllocateInfo;
 	allocInfo.pNext = chainCopy;
 
+	// TODO: track this
+	// Buffer* dedicatedBuffer {};
+	// Image* dedicatedImage {};
+
 	// unwrap handles in VkMemoryDedicatedAllocateInfo
 	auto* dedicatedv = findChainInfo2<VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO>(chainCopy);
 	if(dedicatedv) {

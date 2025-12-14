@@ -233,13 +233,14 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		VkDeviceSize                                memoryOffset) {
 	auto& buf = get(device, buffer);
 	auto& mem = get(*buf.dev, memory);
-	bindBufferMemory(buf, mem, memoryOffset);
 
 	auto res = buf.dev->dispatch.BindBufferMemory(buf.dev->handle,
-		buf.handle, memory, memoryOffset);
+		buf.handle, mem.handle, memoryOffset);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
+
+	bindBufferMemory(buf, mem, memoryOffset);
 
 	return VK_SUCCESS;
 }
@@ -264,9 +265,8 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 		// could be VK_NULL_HANDLE for extensions
 		// e.g. the case for BindImageMemory2, we add this branch
 		// here defensively
-		if(bind.memory) {
+		if (fwd[i].memory) {
 			auto& mem = get(dev, bind.memory);
-			bindBufferMemory(buf, mem, bind.memoryOffset);
 			fwd[i].memory = mem.handle;
 		}
 	}
@@ -279,6 +279,11 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		auto& buf = get(dev, bind.buffer);
+
+		if(bind.memory) {
+			auto& mem = get(dev, bind.memory);
+			bindBufferMemory(buf, mem, bind.memoryOffset);
+		}
 	}
 
 	return VK_SUCCESS;

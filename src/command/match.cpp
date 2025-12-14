@@ -662,37 +662,52 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 		auto sizeA = descriptorCount(a, bindingID);
 		auto sizeB = descriptorCount(b, bindingID);
 
-		if(sizeA == 0u || sizeB == 0u) {
+		auto& layoutA = a.layout->bindings[bindingID];
+		auto& layoutB = b.layout->bindings[bindingID];
+
+		if(layoutA.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
+			sizeA = 1u;
+		}
+		if(layoutB.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
+			sizeB = 1u;
+		}
+
+		m.total += std::max(sizeA, sizeB);
+
+		if(layoutA.descriptorType != layoutB.descriptorType) {
 			continue;
 		}
 
-		// must have the same type
-		auto dsType = a.layout->bindings[bindingID].descriptorType;
-		dlg_assert_or(a.layout->bindings[bindingID].descriptorType ==
-			b.layout->bindings[bindingID].descriptorType, continue);
+		if(layoutA.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
+			auto bytesA = inlineUniformBlock(a, bindingID);
+			auto bytesB = inlineUniformBlock(b, bindingID);
+			if(bytesA.size() == bytesB.size() &&
+					std::memcmp(bytesA.data(), bytesB.data(), bytesA.size()) == 0) {
+				++m.match;
+			}
 
-		if(dsType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
-			// This might seem like a low weight but the bytewise
-			// comparison isn't the best anyways. Counting the number
-			// of equal bytes or weighing this by the block size
-			// would be bad.
-			m.total += 1;
-		} else {
-			// sizeA might not be the same as sizeB for variable descriptor counts
-			m.total += std::max(sizeA, sizeB);
+			continue;
 		}
 
-		// if samplers or image/buffers views are different we check them for
-		// semantic equality as well. Applications sometimes create
-		// them lazily/on-demand or stuff like that.
+		for(auto elemID = 0u; elemID < std::min(sizeA, sizeB); ++elemID) {
+			// check again for mutable descriptor type
+			auto typeA = descriptorType(a, bindingID, elemID);
+			auto typeB = descriptorType(b, bindingID, elemID);
 
-		auto dsCat = vil::category(dsType);
-		if(dsCat == DescriptorCategory::image) {
-			auto bindingsA = images(a, bindingID);
-			auto bindingsB = images(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto& bindA = bindingsA[e];
-				auto& bindB = bindingsB[e];
+			if(typeA != typeB) {
+				continue;
+			}
+
+			auto dsType = typeA;
+
+			// if samplers or image/buffers views are different we check them for
+			// semantic equality as well. Applications sometimes create
+			// them lazily/on-demand or stuff like that.
+
+			auto dsCat = vil::category(typeA);
+			if(dsCat == DescriptorCategory::image) {
+				auto& bindA = dsImage(a, bindingID, elemID);
+				auto& bindB = dsImage(b, bindingID, elemID);
 
 				MatchVal combined;
 
@@ -726,13 +741,9 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 
 				// NOTE: consider image layout? not too relevant I guess
 				m.match += eval(combined);
-			}
-		} else if(dsCat == DescriptorCategory::buffer) {
-			auto bindingsA = buffers(a, bindingID);
-			auto bindingsB = buffers(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto& bindA = bindingsA[e];
-				auto& bindB = bindingsB[e];
+			} else if(dsCat == DescriptorCategory::buffer) {
+				auto& bindA = dsBuffer(a, bindingID, elemID);
+				auto& bindB = dsBuffer(b, bindingID, elemID);
 
 				auto bufMatch = match(mt, bindA.buffer, bindB.buffer);
 				if(!noMatch(bufMatch)) {
@@ -740,31 +751,23 @@ MatchVal match(MatchType mt, const DescriptorStateRef& a, const DescriptorStateR
 					add(bufMatch, bindA.range, bindB.range);
 					m.match += eval(bufMatch);
 				}
-			}
-		} else if(dsCat == DescriptorCategory::bufferView) {
-			auto bindingsA = bufferViews(a, bindingID);
-			auto bindingsB = bufferViews(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto bvMatch = match(mt, bindingsA[e].bufferView, bindingsB[e].bufferView);
+			} else if(dsCat == DescriptorCategory::bufferView) {
+				auto* handleA = dsBufferView(a, bindingID, elemID).bufferView;
+				auto* handleB = dsBufferView(b, bindingID, elemID).bufferView;
+				auto bvMatch = match(mt, handleA, handleB);
 				m.match += eval(bvMatch);
-			}
-		} else if(dsCat == DescriptorCategory::accelStruct) {
-			auto bindingsA = accelStructs(a, bindingID);
-			auto bindingsB = accelStructs(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto asMatch = match(mt, bindingsA[e].accelStruct, bindingsB[e].accelStruct);
+			} else if(dsCat == DescriptorCategory::accelStruct) {
+				auto* handleA = dsAccelStruct(a, bindingID, elemID).accelStruct;
+				auto* handleB = dsAccelStruct(b, bindingID, elemID).accelStruct;
+				auto asMatch = match(mt, handleA, handleB);
 				m.match += eval(asMatch);
+			} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
+				dlg_error("unreahable!");
+			} else {
+				dlg_error("Unsupported descriptor type: {}", u32(dsType));
 			}
-		} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
-			auto bytesA = inlineUniformBlock(a, bindingID);
-			auto bytesB = inlineUniformBlock(b, bindingID);
-			if(bytesA.size() == bytesB.size() &&
-					std::memcmp(bytesA.data(), bytesB.data(), bytesA.size()) == 0) {
-				++m.match;
-			}
-		} else {
-			dlg_error("Unsupported descriptor type: {}", u32(dsType));
 		}
+
 	}
 
 	// TODO: account in matcher for non-overlapping bindings?

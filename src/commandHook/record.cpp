@@ -845,7 +845,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	dlg_assertl(dlg_level_warn, cat == DescriptorCategory::image || !imageAsBuffer);
 
 	if(cat == DescriptorCategory::image) {
-		auto& elem = images(descriptors, bindingID)[elemID];
+		auto& elem = dsImage(descriptors, bindingID, elemID);
 		if(needsImageView(bindingLayout.descriptorType)) {
 			auto& imgView = elem.imageView;
 			dlg_assert_or(imgView, return);
@@ -900,7 +900,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 			dlg_error("Requested descriptor binding copy for sampler");
 		}
 	} else if(cat == DescriptorCategory::buffer) {
-		auto& elem = buffers(descriptors, bindingID)[elemID];
+		auto& elem = dsBuffer(descriptors, bindingID, elemID);
 		dlg_assert_or(elem.buffer, return);
 
 		usedHandles.push_back(elem.buffer);
@@ -927,7 +927,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dstBuf, 0u, *elem.buffer, off, size, {});
 	} else if(cat == DescriptorCategory::accelStruct) {
-		auto& elem = accelStructs(descriptors, bindingID)[elemID];
+		auto& elem = dsAccelStruct(descriptors, bindingID, elemID);
 		dlg_assert_or(elem.accelStruct, return);
 
 		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;

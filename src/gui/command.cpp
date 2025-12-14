@@ -949,7 +949,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		}
 
 		// general info
-		auto& elem = buffers(dsState, bindingID)[elemID];
+		auto& elem = dsBuffer(dsState, bindingID, elemID);
 		dlg_assert(elem.buffer);
 
 		ImGui::SameLine();
@@ -1007,7 +1007,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			if(bindingLayout.immutableSamplers) {
 				refButtonExpect(gui, bindingLayout.immutableSamplers[elemID].get());
 			} else {
-				auto& elem = images(dsState, bindingID)[elemID];
+				auto& elem = dsImage(dsState, bindingID, elemID);
 				refButtonExpect(gui, elem.sampler);
 			}
 		}
@@ -1015,7 +1015,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		// == Image ==
 		if(needsImageView(dsType)) {
 			// general info
-			auto& elem = images(dsState, bindingID)[elemID];
+			auto& elem = dsImage(dsState, bindingID, elemID);
 			dlg_assertm_or(elem.imageView, return, "dsType {}", vk::name(dsType));
 
 			// refButton(gui, imgView);
@@ -1072,7 +1072,7 @@ void CommandViewer::displayDs(Draw& draw) {
 	} else if(dsCat == DescriptorCategory::bufferView) {
 		imGuiText("TODO: bufferView viewer not implemented yet");
 	} else if(dsCat == DescriptorCategory::accelStruct) {
-		auto& elem = accelStructs(dsState, bindingID)[elemID];
+		auto& elem = dsAccelStruct(dsState, bindingID, elemID);
 		refButtonExpect(gui, elem.accelStruct);
 
 		// content

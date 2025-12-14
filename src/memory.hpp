@@ -100,6 +100,10 @@ struct DeviceMemory : SharedDeviceHandle {
 	VkDeviceSize mapOffset {};
 	VkDeviceSize mapSize {};
 
+	// TODO: track this
+	// Image* dedicatedImage {};
+	// Image* dedicatedBuffer {};
+
 	// Sorted by memory offset. Keep in mind that allocations may alias. If
 	// multiple allocations have the same offset, the sorting between those
 	// is arbitrary.
