@@ -320,9 +320,8 @@ void initDescriptorState(DescriptorStateRef state) {
 
 void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 		DescriptorStateRef src, unsigned srcBindID, unsigned srcElemID) {
-	auto& srcLayout = src.layout->bindings[srcBindID];
+	// auto& srcLayout = src.layout->bindings[srcBindID];
 	auto& dstLayout = dst.layout->bindings[dstBindID];
-	dlg_assert(srcLayout.descriptorType == dstLayout.descriptorType);
 
 	VkDescriptorType srcType = descriptorType(src, srcBindID, srcElemID);
 	if (dstLayout.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT) {
@@ -741,7 +740,6 @@ T& accessDescriptor(DescriptorStateRef state, unsigned binding, unsigned elem,
 	dlg_assert(binding < state.layout->bindings.size());
 
 	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == dsCat);
 	dlg_assert(elem < descriptorCount(state, binding));
 
 	auto offset = layout.offset;
@@ -753,6 +751,8 @@ T& accessDescriptor(DescriptorStateRef state, unsigned binding, unsigned elem,
 		offset = align(offset, sizeof(void*));
 		offset += elem * maxDescriptorSize;
 	} else {
+		dlg_assertm(category(layout.descriptorType) == dsCat,
+			"descriptorType {}, dsCat {}", layout.descriptorType, unsigned(dsCat));
 		offset += elem * sizeof(T);
 	}
 
@@ -770,81 +770,12 @@ ImageDescriptor& dsImage(DescriptorStateRef state, unsigned binding, unsigned el
 }
 
 BufferViewDescriptor& dsBufferView(DescriptorStateRef state, unsigned binding, unsigned elem) {
-	return accessDescriptor<BufferViewDescriptor>(state, binding, elem, DescriptorCategory::image);
+	return accessDescriptor<BufferViewDescriptor>(state, binding, elem, DescriptorCategory::bufferView);
 }
 
 AccelStructDescriptor& dsAccelStruct(DescriptorStateRef state, unsigned binding, unsigned elem) {
-	return accessDescriptor<AccelStructDescriptor>(state, binding, elem, DescriptorCategory::image);
+	return accessDescriptor<AccelStructDescriptor>(state, binding, elem, DescriptorCategory::accelStruct);
 }
-
-/*
-span<BufferDescriptor> buffers(DescriptorStateRef state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::buffer);
-
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto ptr = state.data + layout.offset;
-	auto d = std::launder(reinterpret_cast<BufferDescriptor*>(ptr));
-	return {d, count};
-}
-span<ImageDescriptor> images(DescriptorStateRef state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto offset = layout.offset;
-	if(layout.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT) {
-		offset += sizeof(VkDescriptorType) * count;
-		offset = align(offset, alignof(void*));
-	} else {
-		dlg_assert(category(layout.descriptorType) == DescriptorCategory::image);
-	}
-
-	auto ptr = state.data + offset;
-	auto d = std::launder(reinterpret_cast<ImageDescriptor*>(ptr));
-	return {d, count};
-}
-span<BufferViewDescriptor> bufferViews(DescriptorStateRef state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::bufferView);
-
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto ptr = state.data + layout.offset;
-	auto d = std::launder(reinterpret_cast<BufferViewDescriptor*>(ptr));
-	return {d, count};
-}
-span<AccelStructDescriptor> accelStructs(DescriptorStateRef state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::accelStruct);
-
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto ptr = state.data + layout.offset;
-	auto d = std::launder(reinterpret_cast<AccelStructDescriptor*>(ptr));
-	return {d, count};
-}
-*/
 
 span<std::byte> inlineUniformBlock(DescriptorStateRef state, unsigned binding) {
 	dlg_assert(binding < state.layout->bindings.size());
@@ -1170,6 +1101,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 	dsPool.dataSize = dsPool.maxSets * sizeof(DescriptorSet);
 	for(auto& pool : dsPool.poolSizes) {
 		dsPool.dataSize += descriptorSize(pool.type) * pool.descriptorCount;
+		dlg_assert(descriptorSize(pool.type) % alignof(void*) == 0u);
+
+		if(pool.type == VK_DESCRIPTOR_TYPE_MUTABLE_EXT) {
+			dsPool.dataSize += align(sizeof(VkDescriptorType), alignof(void*)) * pool.descriptorCount;
+		}
 	}
 
 	// NOTE: no idea why this was needed for the nvidia rtxgi samples.
@@ -1470,10 +1406,12 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 	if(res != VK_SUCCESS) {
 		for(auto j = 0u; j < i; ++j) {
-			destroy(*dss[i], true);
+			if(dss[i]) {
+				destroy(*dss[i], true);
+			}
 		}
-		dev.dispatch.FreeDescriptorSets(dev.handle, pool.handle,
-			count, pDescriptorSets);
+
+		dev.dispatch.FreeDescriptorSets(dev.handle, pool.handle, count, pDescriptorSets);
 		memset(pDescriptorSets, 0x0, sizeof(pDescriptorSets[0]) * count);
 		return res;
 	}
@@ -1535,7 +1473,7 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
-		VkDescriptorImageInfo& img) {
+		VkDescriptorImageInfo& img, VkDescriptorType dsType) {
 	auto& dev = *state.layout->dev;
 
 	auto& binding = dsImage(state, bind, elem);
@@ -1544,7 +1482,7 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	auto& layout = state.layout->bindings[bind];
 
 	// update imageView, if needed
-	if(needsImageView(layout.descriptorType)) {
+	if(needsImageView(dsType)) {
 		ImageView* newView {};
 		if(img.imageView) VIL_LIKELY { // can be VK_NULL_HANDLE
 			newView = &get(dev, img.imageView);
@@ -1564,7 +1502,7 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	}
 
 	// update sampler, if needed
-	if(needsSampler(layout.descriptorType)) {
+	if(needsSampler(dsType)) {
 		if(layout.immutableSamplers) {
 			// immutable samplers are initialized at the beginning and
 			// never unset.
@@ -1730,10 +1668,11 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			advanceUntilValid(ds, dstBinding, dstElem);
 			dlg_assert(dstBinding < ds.layout->bindings.size());
 			auto& layout = ds.layout->bindings[dstBinding];
-			dlg_assert(write.descriptorType == layout.descriptorType);
 
 			if(layout.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT) {
 				mutableDescriptorType(ds, dstBinding, dstElem) = write.descriptorType;
+			} else {
+				dlg_assert(write.descriptorType == layout.descriptorType);
 			}
 
 			switch(category(write.descriptorType)) {
@@ -1741,7 +1680,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 					dlg_assert(write.pImageInfo);
 					auto& info = imageInfos[writeOff + j];
 					info = write.pImageInfo[j];
-					update(ds, dstBinding, dstElem, info);
+					update(ds, dstBinding, dstElem, info, write.descriptorType);
 					break;
 				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
@@ -1934,12 +1873,19 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	for(auto& entry : dut.entries) {
 		auto dstBinding = entry.dstBinding;
 		auto dstElem = entry.dstArrayElement;
-		auto dsType = ds.layout->bindings[dstBinding].descriptorType;
+		auto dsType = entry.descriptorType;
 
 		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
 			// PERF Could we maybe determine this statically
 			// in CreateDescriptorUpdateTemplate?
 			advanceUntilValid(ds, dstBinding, dstElem);
+
+			auto& layout = ds.layout->bindings[dstBinding];
+			if(layout.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT) {
+				mutableDescriptorType(ds, dstBinding, dstElem) = dsType;
+			} else {
+				dlg_assert(dsType == layout.descriptorType);
+			}
 
 			// TODO: such an assertion here would be nice. Track used
 			// layout in update?
@@ -1955,7 +1901,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 			switch(category(dsType)) {
 				case DescriptorCategory::image: {
 					auto& img = *reinterpret_cast<VkDescriptorImageInfo*>(data);
-					update(ds, dstBinding, dstElem, img);
+					update(ds, dstBinding, dstElem, img, dsType);
 					break;
 				} case DescriptorCategory::buffer: {
 					auto& buf = *reinterpret_cast<VkDescriptorBufferInfo*>(data);

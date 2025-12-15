@@ -45,6 +45,10 @@ bool hasAppExt(Device& dev, const char* extName) {
 	return (it != dev.appExts.end());
 }
 
+bool supportsShaderDebug(Device& dev) {
+	return dev.bufferDeviceAddress;
+}
+
 VkResult VKAPI_PTR SetDeviceLoaderDataNOOP(VkDevice, void*) {
 	// noop
 	return VK_SUCCESS;

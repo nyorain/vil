@@ -360,6 +360,7 @@ VkFormat findSupported(const Device& dev, span<const VkFormat> formats,
 VkFormat findDepthFormat(const Device& dev);
 
 bool hasAppExt(Device& dev, const char* extName);
+bool supportsShaderDebug(Device& dev);
 
 struct StandaloneDeviceInfo {
 	PFN_vkGetInstanceProcAddr getInstanceProcAddr;
