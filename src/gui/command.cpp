@@ -1595,7 +1595,7 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
-	if(isStateCmd(*command_.back())) {
+	if(isStateCmd(*command_.back()) && supportsShaderDebug(dev())) {
 		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
 		// NOTE: we do not support traceRaysIndirect as of now.
 		// This would make shader table hooking significantly more complicated.

@@ -71,6 +71,8 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 
 	VkMemoryAllocateFlagsInfo flagsInfo {};
 	if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		dlg_assert(dev.bufferDeviceAddress);
+
 		flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
 		flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 		allocInfo.pNext = &flagsInfo;
@@ -147,6 +149,8 @@ vku::BufferSpan OwnBuffer::asSpan(VkDeviceSize offset, VkDeviceSize size) const 
 
 VkDeviceAddress OwnBuffer::queryAddress() const {
 	dlg_assert(dev && buf);
+	dlg_assert(dev->bufferDeviceAddress);
+
 	VkBufferDeviceAddressInfo info {};
 	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
 	info.buffer = buf;

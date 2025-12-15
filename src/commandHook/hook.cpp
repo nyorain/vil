@@ -148,13 +148,15 @@ CommandHook::CommandHook(Device& dev) {
 	}
 
 	// init capture
-	auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-		VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	captureBuffer_.ensure(dev, shaderCaptureSize, usage, {},
-		"CaptureBuf", OwnBuffer::Type::deviceLocal);
-	captureAddress_ = captureBuffer_.queryAddress();
+	if (supportsShaderDebug(dev)) {
+		auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		captureBuffer_.ensure(dev, shaderCaptureSize, usage, {},
+			"CaptureBuf", OwnBuffer::Type::deviceLocal);
+		captureAddress_ = captureBuffer_.queryAddress();
+	}
 }
 
 CommandHook::~CommandHook() {

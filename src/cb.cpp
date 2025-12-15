@@ -100,6 +100,17 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 	for(auto i = 0u; i < sets.size(); ++i) {
 		auto s = firstSet + i;
+		if (!sets[i]) {
+#ifdef DS_DISTURB_CHECKS
+			if(!descriptorSets[s].layout) {
+				followingDisturbed = true;
+			}
+#endif // DS_DISTURB_CHECKS
+
+			descriptorSets[i] = {};
+			continue;
+		}
+
 		auto& dsLayout = *layout.descriptors[s];
 
 #ifdef DS_DISTURB_CHECKS
@@ -1125,6 +1136,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	ThreadMemScope memScope;
 	auto setHandles = memScope.allocUndef<VkDescriptorSet>(descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
+		if(!pDescriptorSets[i]) { // null handles are allowed
+			cmd.sets[i] = nullptr;
+			setHandles[i] = {};
+			continue;
+		}
+
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
 		cmd.sets[i] = &ds;

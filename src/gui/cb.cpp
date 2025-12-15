@@ -32,7 +32,6 @@
 #include <vk/format_utils.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
-#include <bitset>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -611,6 +610,8 @@ void CommandRecordGui::displaySubmission(FrameSubmission& batch, u32 subID) {
 }
 
 void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
+	(void) batchID;
+
 	const auto id = dlg::format("submission:{}", batch.submissionID);
 	auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
 

@@ -1,3 +1,6 @@
+- [ ] try to enable bufferDeviceAddress
+- [ ] fix errors with validation tests
+	- [ ] document how to run validation tests
 - [ ] when VIL_SKIP_EXT_CHECK is set (or other env var?) override supported
       extensions in that function. Investigate how to make this work.
 	  Can be provided in layer manifest or something?

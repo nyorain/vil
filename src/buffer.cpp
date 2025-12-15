@@ -60,8 +60,7 @@ void Buffer::onApiDestroy() {
 
 	std::lock_guard lock(dev->mutex);
 	if(ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-		auto num = dev->bufferAddresses.erase(this);
-		dlg_assert(num == 1u);
+		dev->bufferAddresses.erase(this);
 	}
 
 	for(auto* view : this->views) {
