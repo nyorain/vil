@@ -6,6 +6,7 @@
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/fmt.hpp>
+#include <util/chain.hpp>
 #include <device.hpp>
 #include <stats.hpp>
 #include <buffer.hpp>

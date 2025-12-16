@@ -19,6 +19,7 @@
 #include <fault.hpp>
 #include <exts.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/submission.hpp>

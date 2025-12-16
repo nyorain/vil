@@ -8,6 +8,7 @@
 #include <ds.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 #include <vkutil/enumString.hpp>
 
 namespace vil {
@@ -228,10 +229,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		}
 	}
 
+	// don't modify when it's an image for a swapchain
+	auto allowShared = true;
+	if(hasChain(*pCreateInfo, VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR)) {
+		allowShared = false;
+		// TODO: unwrap swapchain!
+	}
+
 	// NOTE: needed for our own operations on the buffer. Might be better to
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	if(dev.usedQueueFamilyIndices.size() > 1 &&
+	if(allowShared && dev.usedQueueFamilyIndices.size() > 1 &&
 			nci.sharingMode != VK_SHARING_MODE_CONCURRENT &&
 			nearestSampling) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
@@ -404,16 +412,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 	auto fwd = memScope.alloc<VkBindImageMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
+		fwd[i] = bind;
 		dlg_assert(bind.image);
 
-		auto& img = get(dev, bind.image);
-
-		fwd[i] = bind;
-		fwd[i].image = img.handle;
-
 		// can be VK_NULL_HANDLE, e.g. for VkBindImageMemorySwapchainInfoKHR
-		if(fwd[i].memory) {
-			auto& mem = get(dev, fwd[i].memory);
+		// TODO: handle VkBindImageMemorySwapchainInfoKHR
+		if(bind.image) {
+			auto& img = get(dev, bind.image);
+			fwd[i].image = img.handle;
+		}
+
+		if(bind.memory) {
+			auto& mem = get(dev, bind.memory);
 			fwd[i].memory = mem.handle;
 		}
 	}
@@ -425,12 +435,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
-		auto& img = get(dev, bind.image);
-
-		if(bind.memory) {
-			auto& mem = get(dev, bind.memory);
-			bindImageMemory(img, mem, bind.memoryOffset);
+		if(!bind.image || !bind.memory) {
+			continue;
 		}
+
+		auto& img = get(dev, bind.image);
+		auto& mem = get(dev, bind.memory);
+		bindImageMemory(img, mem, bind.memoryOffset);
 	}
 
 	return res;

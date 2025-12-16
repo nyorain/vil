@@ -13,6 +13,7 @@
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/intrusive.hpp>
+#include <util/chain.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <commandHook/submission.hpp>

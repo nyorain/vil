@@ -11,6 +11,7 @@
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <util/dlg.hpp>
+#include <util/chain.hpp>
 #include <vkutil/enumString.hpp>
 
 namespace vil {

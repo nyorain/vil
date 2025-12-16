@@ -349,6 +349,9 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_EXT_shader_uniform_buffer_unsized_array",
 	"VK_VALVE_mutable_descriptor_type",
 	"VK_EXT_mutable_descriptor_type", // TODO: push + mutable not supported right now
+	"VK_KHR_depth_stencil_resolve",
+	"VK_EXT_vertex_attribute_divisor",
+	"VK_KHR_vertex_attribute_divisor",
 };
 
 // Known/look like they might cause problems or crashes.
@@ -445,8 +448,6 @@ constexpr std::string_view unsupportedDevExts[] = {
 	"VK_KHR_video_maintenance1",
 	"VK_NV_per_stage_descriptor_set",
 	"VK_EXT_attachment_feedback_loop_dynamic_state", // TODO
-	"VK_EXT_vertex_attribute_divisor", // TODO: pNext pointer patching
-	"VK_KHR_vertex_attribute_divisor", // TODO: pNext pointer patching
 	"VK_QNX_external_memory_screen_buffer",
 	"VK_QCOM_tile_memory_heap",
 	"VK_KHR_copy_memory_indirect", // TODO commands
@@ -469,7 +470,6 @@ constexpr std::string_view unsupportedDevExts[] = {
 	"VK_QCOM_data_graph_model",
 	"VK_KHR_maintenance10", // TODO: CmdEndRendering2
 	"VK_SEC_pipeline_cache_incremental_mode",
-	"VK_KHR_depth_stencil_resolve", // TODO: pNext pointer patching
 };
 
 // last VK_EXT_image_compression_control

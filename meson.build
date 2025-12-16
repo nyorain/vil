@@ -200,6 +200,7 @@ src = files(
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
 	'src/util/patch.cpp',
+	'src/util/chain.cpp',
 	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',

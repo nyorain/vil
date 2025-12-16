@@ -1,14 +1,13 @@
-#include "vk/vulkan_core.h"
 #include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/f16.hpp>
 #include <nytl/bytes.hpp>
 #include <nytl/vecOps.hpp>
 #include <util/dlg.hpp>
-#include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
 #include <vk/format_utils.h>
 #include <vkutil/enumString.hpp>
+#include <vk/vulkan_core.h>
 #include <cmath>
 #include <cstdio>
 
@@ -85,114 +84,6 @@ VkImageViewType minImageViewType(VkExtent3D size, unsigned layers,
 	} else {
 		return layers > 1 ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D;
 	}
-}
-
-std::size_t structSize(VkStructureType type) {
-	// special layer structures
-	switch(type) {
-		case VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO: return sizeof(VkLayerInstanceCreateInfo);
-		case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO: return sizeof(VkLayerDeviceCreateInfo);
-		default: break;
-	}
-
-	LvlGenericHeader header {};
-	header.sType = type;
-	std::size_t size = sizeof(header);
-
-	auto success = castCall(header, [&](auto& casted) { size = sizeof(casted); });
-	dlg_assertm(success, "unknown stype {}", type);
-
-	return size;
-}
-
-std::unique_ptr<std::byte[]> copyChain(const void* pNext) {
-	if(!pNext) {
-		return {};
-	}
-
-	// first march-through: find needed size
-	std::size_t size = 0u;
-	auto it = pNext;
-	while(it) {
-		auto src = static_cast<const VkBaseInStructure*>(it);
-
-		auto ssize = structSize(src->sType);
-		dlg_assertm(ssize > 0, "Unknown structure type: {}", src->sType);
-		size += ssize;
-
-		it = src->pNext;
-	}
-
-	auto buf = std::make_unique<std::byte[]>(size);
-	auto offset = std::size_t(0u);
-
-	// second-march-through: copy structure
-	VkBaseInStructure* last = nullptr;
-	it = pNext;
-	while(it) {
-		auto src = static_cast<const VkBaseInStructure*>(it);
-		auto size = structSize(src->sType);
-		dlg_assertm(size > 0, "Unknown structure type: {}", src->sType);
-
-		auto dst = reinterpret_cast<VkBaseInStructure*>(buf.get() + offset);
-		// TODO: technicallly UB to not construct object via placement new.
-		// In practice, this works everywhere since its only C PODs
-		std::memcpy(dst, src, size);
-		offset += size;
-
-		if(last) {
-			last->pNext = dst;
-		} else {
-			pNext = dst;
-		}
-
-		last = dst;
-		it = src->pNext;
-	}
-
-	dlg_assert(offset == size);
-	return buf;
-}
-
-void* copyChainPatch(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
-	if(!pNext) {
-		return nullptr;
-	}
-
-	buf = copyChainPatch(pNext);
-	return static_cast<void*>(buf.get());
-}
-
-void* copyChainLocal(ThreadMemScope& memScope, const void* pNext) {
-	VkBaseInStructure* last = nullptr;
-	void* ret = nullptr;
-	auto it = static_cast<const VkBaseInStructure*>(pNext);
-
-	while(it) {
-		auto size = structSize(it->sType);
-		dlg_assertm_or(size > 0, it = it->pNext; continue,
-			"Unknown structure type: {}", it->sType);
-
-		auto dstBuf = memScope.alloc<std::byte>(size);
-		auto* dst = reinterpret_cast<VkBaseInStructure*>(dstBuf.data());
-
-		// TODO: technicallly UB to not construct object via placement new.
-		// In practice, this works everywhere since its only C PODs
-		std::memcpy(dst, it, size);
-		dst->pNext = nullptr;
-
-		if(!last) {
-			dlg_assert(!ret);
-			ret = static_cast<void*>(dst);
-		} else {
-			last->pNext = dst;
-		}
-
-		last = dst;
-		it = it->pNext;
-	}
-
-	return ret;
 }
 
 void writeFile(const char* path, span<const std::byte> buffer, bool binary) {

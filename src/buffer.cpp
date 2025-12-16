@@ -5,6 +5,7 @@
 #include <ds.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 
 namespace vil {
 
@@ -254,17 +255,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	auto fwd = memScope.alloc<VkBindBufferMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
-		dlg_assert(bind.buffer);
-
-		auto& buf = get(dev, bind.buffer);
-
 		fwd[i] = bind;
-		fwd[i].buffer = buf.handle;
+		dlg_assert(bind.buffer);
 
 		// could be VK_NULL_HANDLE for extensions
 		// e.g. the case for BindImageMemory2, we add this branch
 		// here defensively
-		if (fwd[i].memory) {
+		if(bind.buffer) {
+			auto& buf = get(dev, bind.buffer);
+			fwd[i].buffer = buf.handle;
+		}
+
+		if(bind.memory) {
 			auto& mem = get(dev, bind.memory);
 			fwd[i].memory = mem.handle;
 		}
@@ -277,12 +279,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
-		auto& buf = get(dev, bind.buffer);
-
-		if(bind.memory) {
-			auto& mem = get(dev, bind.memory);
-			bindBufferMemory(buf, mem, bind.memoryOffset);
+		if(!bind.buffer || !bind.memory) {
+			continue;
 		}
+
+		auto& buf = get(dev, bind.buffer);
+		auto& mem = get(dev, bind.memory);
+		bindBufferMemory(buf, mem, bind.memoryOffset);
 	}
 
 	return VK_SUCCESS;

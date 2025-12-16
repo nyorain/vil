@@ -17,38 +17,16 @@
 #include <command/commands.hpp>
 #include <commandHook/record.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 #include <util/ext.hpp>
 #include <util/profiling.hpp>
 
 namespace vil {
 
 void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
-	VkBaseInStructure* last = nullptr;
-	auto it = static_cast<const VkBaseInStructure*>(pNext);
-	pNext = nullptr;
-
-	while(it) {
-		auto size = structSize(it->sType);
-		dlg_assertm_or(size > 0, it = it->pNext; continue,
-			"Unknown structure type: {}", it->sType);
-		dlg_assert(cb.builder().record_);
-
-		auto& rec = *cb.builder().record_;
-		auto buf = rec.alloc.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
-		// TODO: technicallly UB to not construct object via placement new.
-		// In practice, this works everywhere since its only C PODs
-		std::memcpy(dst, it, size);
-
-		if(last) {
-			last->pNext = dst;
-		} else {
-			pNext = dst;
-		}
-
-		last = dst;
-		it = it->pNext;
-	}
+	dlg_assert(cb.builder().record_);
+	auto& rec = *cb.builder().record_;
+	pNext = copyChain(rec.alloc, pNext);
 }
 
 // TODO: optionally(?) take a list of expected sTypes

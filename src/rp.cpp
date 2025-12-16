@@ -4,6 +4,7 @@
 #include <image.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 #include <util/ext.hpp>
 #include <vk/format_utils.h>
 
@@ -123,7 +124,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	// Symbolic state per attachment:
 	// (attachmentID, subpassID, sequenceID)
 	// When an attachment A is written in subpass S, it is moved to
-	// state (A, I, 0). Initially all attachments A start in state (A, u32(-1), 0).
+	// state (A, S, 0). Initially all attachments A start in state (A, u32(-1), 0).
 	// 'sequenceID' is only used to seperate between partially executed
 	// render passes, when the split is performed.
 	// Splitting is mainly a problem for certain ordering of resolve attachments.

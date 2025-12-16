@@ -5,6 +5,7 @@
 #include <buffer.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
+#include <util/chain.hpp>
 
 namespace vil {
 

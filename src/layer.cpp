@@ -22,6 +22,7 @@
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
+#include <util/chain.hpp>
 #include <util/dlg.hpp>
 #include <vkutil/enumString.hpp>
 
