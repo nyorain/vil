@@ -23,17 +23,15 @@
 
 namespace vil {
 
-void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
+// TODO: optionally(?) take a list of expected sTypes
+void* copyChain(CommandBuffer& cb, const void* pNext) {
 	dlg_assert(cb.builder().record_);
 	auto& rec = *cb.builder().record_;
-	pNext = copyChain(rec.alloc, pNext);
+	return copyChain(rec.alloc, pNext);
 }
 
-// TODO: optionally(?) take a list of expected sTypes
-const void* copyChain(CommandBuffer& cb, const void* pNext) {
-	auto ret = pNext;
-	copyChainInPlace(cb, ret);
-	return ret;
+void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
+	pNext = copyChain(cb, pNext);
 }
 
 template<typename D, typename T>
@@ -3624,6 +3622,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(
 	cmd.firstSet = info.firstSet;
 	cmd.stageFlags = info.stageFlags;
 	cmd.dynamicOffsets = copySpan(cb, info.pDynamicOffsets, info.dynamicOffsetCount);
+	cmd.pNext = copyChain(cb, info.pNext);
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, info.layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
@@ -3688,6 +3687,8 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(
 	cmd.offset = info.offset;
 	auto ptr = static_cast<const std::byte*>(info.pValues);
 	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), info.size);
+	cmd.pNext = copyChain(cb, pPushConstantsInfo->pNext);
+	cmd.v2 = true;
 
 	// reallocate push constants
 	auto& pc = cb.pushConstants().data;
@@ -3714,6 +3715,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet2(
 	cmd.set = info.set;
 	cmd.descriptorWrites = copySpan(cb, info.pDescriptorWrites,
 		info.descriptorWriteCount);
+	cmd.pNext = copyChain(cb, pPushDescriptorSetsInfo->pNext);
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, info.layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
@@ -3900,7 +3902,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPreprocessGeneratedCommandsEXT(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+		// See commends in PreprocessGeneratedCommandsCmd::record
+		// cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+		auto info = convert(cmd.info);
+		cb.dev->dispatch.CmdPreprocessGeneratedCommandsEXT(cb.handle,
+			&info, cmd.state->handle);
 	}
 }
 
@@ -4231,6 +4237,99 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias2EXT(
 	cmd.pNext = copyChain(cb, pDepthBiasInfo->pNext);
 
 	cb.dev->dispatch.CmdSetDepthBias2EXT(cb.handle, pDepthBiasInfo);
+}
+
+// VK_EXT_descriptor_buffer
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBuffersEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    bufferCount,
+		const VkDescriptorBufferBindingInfoEXT*     pBindingInfos) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindDescriptorBuffersCmd>(cb);
+	cmd.buffers = copySpan(cb, pBindingInfos, bufferCount);
+	for(auto& buf : cmd.buffers) {
+		copyChainInPlace(cb, buf.pNext);
+		// TODO: useHandle for buffer?
+	}
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsetsEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipelineLayout                            layout,
+		uint32_t                                    firstSet,
+		uint32_t                                    setCount,
+		const uint32_t*                             pBufferIndices,
+		const VkDeviceSize*                         pOffsets) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDescriptorBufferOffsetsCmd>(cb);
+	cmd.bindPoint = pipelineBindPoint;
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	useHandle(cb, cmd, *pipeLayoutPtr);
+
+	cmd.firstSet = firstSet;
+	cmd.bufferIndices = copySpan(cb, pBufferIndices, setCount);
+	cmd.offsets = copySpan(cb, pOffsets, setCount);
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplersEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipelineLayout                            layout,
+		uint32_t                                    set) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindDescriptorBufferEmbeddedSamplersCmd>(cb);
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	useHandle(cb, cmd, *pipeLayoutPtr);
+
+	cmd.bindPoint = pipelineBindPoint;
+	cmd.set = set;
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsets2EXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkSetDescriptorBufferOffsetsInfoEXT*  info) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDescriptorBufferOffsetsCmd>(cb);
+	cmd.stages = info->stageFlags;
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, info->layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	useHandle(cb, cmd, *pipeLayoutPtr);
+
+	cmd.firstSet = info->firstSet;
+	cmd.bufferIndices = copySpan(cb, info->pBufferIndices, info->setCount);
+	cmd.offsets = copySpan(cb, info->pOffsets, info->setCount);
+	cmd.pNext = copyChain(cb, info->pNext);
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplers2EXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkBindDescriptorBufferEmbeddedSamplersInfoEXT* info) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindDescriptorBufferEmbeddedSamplersCmd>(cb);
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, info->layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	useHandle(cb, cmd, *pipeLayoutPtr);
+
+	cmd.stages = info->stageFlags;
+	cmd.set = info->set;
+	cmd.pNext = copyChain(cb, info->pNext);
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 } // namespace vil

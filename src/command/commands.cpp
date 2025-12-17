@@ -1012,9 +1012,26 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	ThreadMemScope memScope;
 	auto vkds = rawHandles(memScope, sets);
-	dev.dispatch.CmdBindDescriptorSets(cb, pipeBindPoint, pipeLayout->handle,
-		firstSet, u32(vkds.size()), vkds.data(),
-		u32(dynamicOffsets.size()), dynamicOffsets.data());
+
+	if (stageFlags) {
+		VkBindDescriptorSetsInfo info;
+		info.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO;
+		info.pNext = pNext;
+		info.descriptorSetCount = u32(vkds.size());
+		info.pDescriptorSets = vkds.data();
+		info.dynamicOffsetCount = u32(dynamicOffsets.size());
+		info.pDynamicOffsets = dynamicOffsets.data();
+		info.stageFlags = stageFlags;
+		info.firstSet = firstSet;
+		info.layout = pipeLayout->handle;
+
+		dev.dispatch.CmdBindDescriptorSets2(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdBindDescriptorSets(cb, pipeBindPoint, pipeLayout->handle,
+			firstSet, u32(vkds.size()), vkds.data(),
+			u32(dynamicOffsets.size()), dynamicOffsets.data());
+	}
 }
 
 std::string BindDescriptorSetCmd::toString() const {
@@ -1747,8 +1764,22 @@ std::string BindPipelineCmd::toString() const {
 
 // PushConstantsCmd
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
-		u32(values.size()), values.data());
+	if (v2) {
+		VkPushConstantsInfo info;
+		info.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO;
+		info.pNext = pNext;
+		info.layout = pipeLayout->handle;
+		info.stageFlags = stages;
+		info.offset = offset;
+		info.pValues = values.data();
+		info.size = u32(values.size());
+
+		dev.dispatch.CmdPushConstants2(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
+			u32(values.size()), values.data());
+	}
 }
 
 // SetViewportCmd
@@ -1853,8 +1884,23 @@ void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb, u32)
 
 // PushDescriptorSet
 void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdPushDescriptorSetKHR(cb, bindPoint, pipeLayout->handle,
-		set, u32(descriptorWrites.size()), descriptorWrites.data());
+	if (stages) {
+		dlg_assert(!pNext);
+		VkPushDescriptorSetInfo info;
+		info.sType = VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_INFO;
+		info.pNext = pNext;
+		info.stageFlags = stages;
+		info.layout = pipeLayout->handle;
+		info.set = set;
+		info.descriptorWriteCount = u32(descriptorWrites.size());
+		info.pDescriptorWrites = descriptorWrites.data();
+
+		dev.dispatch.CmdPushDescriptorSet2(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdPushDescriptorSet(cb, bindPoint, pipeLayout->handle,
+			set, u32(descriptorWrites.size()), descriptorWrites.data());
+	}
 }
 
 void PushDescriptorSetCmd::displayInspector(Gui& gui) const {
@@ -1873,8 +1919,20 @@ void PushDescriptorSetCmd::displayInspector(Gui& gui) const {
 
 // PushDescriptorSetWithTemplate
 void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdPushDescriptorSetWithTemplateKHR(cb, updateTemplate->handle,
-		pipeLayout->handle, set, static_cast<const void*>(data.data()));
+	if (v2) {
+		VkPushDescriptorSetWithTemplateInfo info {};
+		info.sType = VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_WITH_TEMPLATE_INFO;
+		info.pNext = pNext;
+		info.descriptorUpdateTemplate = updateTemplate->handle;
+		info.layout = pipeLayout->handle;
+		info.set = set;
+		info.pData = data.data();
+		dev.dispatch.CmdPushDescriptorSetWithTemplate2(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdPushDescriptorSetWithTemplate(cb, updateTemplate->handle,
+			pipeLayout->handle, set, static_cast<const void*>(data.data()));
+	}
 }
 
 // VK_KHR_fragment_shading_rate
@@ -2235,17 +2293,21 @@ VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info) {
 
 void ExecuteGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto fwd = convert(this->info);
-	dev.dispatch.CmdExecuteGeneratedCommandsEXT(cb, isPreprocessed, &fwd);
+	// dev.dispatch.CmdExecuteGeneratedCommandsEXT(cb, isPreprocessed, &fwd);
+	// See PreprocessGeneratedCommandsCmd::record for reasoning of always
+	// passing false here
+	dev.dispatch.CmdExecuteGeneratedCommandsEXT(cb, false, &fwd);
 }
 
 void PreprocessGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto fwd = convert(this->info);
-	// TODO: this is a potential crash! the application is only required to
+	// NOTE: this is difficult! the application is only required to
 	// keep the 'state' commandBuffer alive while recording, not for submission.
 	// We cannot rely on this being alive here when recording later on in hook.
 	// idea:
 	// - keep the handle alive (ugly)
 	// - make this a no-op and always pass true in ExecuteGeneratedCommands? (ugly)
+	// we have chosen the last option for now, as it's simpler
 	dev.dispatch.CmdPreprocessGeneratedCommandsEXT(cb, &fwd, state->handle);
 }
 
@@ -2348,6 +2410,50 @@ void SetDepthBias2Cmd::record(const Device& dev, VkCommandBuffer cb, u32) const 
 	info.depthBiasSlopeFactor = depthBiasSlopeFactor;
 
 	dev.dispatch.CmdSetDepthBias2EXT(cb, &info);
+}
+
+// VK_EXT_descriptor_buffer
+void BindDescriptorBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdBindDescriptorBuffersEXT(cb, u32(buffers.size()), buffers.data());
+}
+
+void SetDescriptorBufferOffsetsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dlg_assert(bufferIndices.size() == offsets.size());
+
+	if (stages) {
+		VkSetDescriptorBufferOffsetsInfoEXT info {};
+		info.sType = VK_STRUCTURE_TYPE_SET_DESCRIPTOR_BUFFER_OFFSETS_INFO_EXT;
+		info.pNext = pNext;
+		info.stageFlags = stages;
+		info.layout = pipeLayout->handle;
+		info.firstSet = firstSet;
+		info.pBufferIndices = bufferIndices.data();
+		info.setCount = u32(bufferIndices.size());
+		info.pOffsets = offsets.data();
+
+		dev.dispatch.CmdSetDescriptorBufferOffsets2EXT(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdSetDescriptorBufferOffsetsEXT(cb, bindPoint, pipeLayout->handle,
+			firstSet, u32(bufferIndices.size()), bufferIndices.data(), offsets.data());
+	}
+}
+
+void BindDescriptorBufferEmbeddedSamplersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	if (stages) {
+		VkBindDescriptorBufferEmbeddedSamplersInfoEXT info {};
+		info.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_BUFFER_EMBEDDED_SAMPLERS_INFO_EXT;
+		info.pNext = pNext;
+		info.layout = pipeLayout->handle;
+		info.set = set;
+		info.stageFlags = stages;
+
+		dev.dispatch.CmdBindDescriptorBufferEmbeddedSamplers2EXT(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		dev.dispatch.CmdBindDescriptorBufferEmbeddedSamplersEXT(cb, bindPoint,
+			pipeLayout->handle, set);
+	}
 }
 
 // util

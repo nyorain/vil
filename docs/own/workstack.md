@@ -5,6 +5,10 @@
       extensions in that function. Investigate how to make this work.
 	  Can be provided in layer manifest or something?
 
+- [ ] support full and+or expressions for "required" extension field
+      in layer.cpp function list.
+	  e.g. vkCmdSetDescriptorBufferOffsets2EXT: (vulkan1.4|maintenance6) + EXT_descriptor_buffer
+
 - [ ] implement VK_KHR_dynamic_rendering_local_read for core 1.4
 - [ ] impement VK_KHR_pipeline_executable_properties
 - [ ] fix invalid pipeline barrier with BeginRendering (test e.g. with iro gpuDebugDraw)
