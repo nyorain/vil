@@ -1056,6 +1056,18 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	// VK_EXT_depth_bias_control
 	VIL_DEV_HOOK_EXT(CmdSetDepthBias2EXT, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME),
 
+	// VK_EXT_descriptor_buffer
+	VIL_DEV_HOOK_EXT(GetDescriptorSetLayoutSizeEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetDescriptorSetLayoutBindingOffsetEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetDescriptorEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	// TODO: support opaque capture functions
+	VIL_DEV_HOOK_EXT(CmdBindDescriptorBuffersEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetDescriptorBufferOffsetsEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBindDescriptorBufferEmbeddedSamplersEXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	// TODO they also require vulkan1.4|maintenance6. Support expressions!
+	VIL_DEV_HOOK_EXT(CmdSetDescriptorBufferOffsets2EXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBindDescriptorBufferEmbeddedSamplers2EXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
+
 	// For dlss testing.
 	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),

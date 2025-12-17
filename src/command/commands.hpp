@@ -179,6 +179,11 @@ enum class CommandType : u32 {
 	// VK_EXT_depth_bias_control
 	setDepthBias2,
 
+	// VK_EXT_descriptor_buffer
+	bindDescriptorBuffers,
+	setDescriptorBufferOffsets,
+	bindDescriptorBufferEmbeddedSamplers,
+
 	count,
 };
 
@@ -689,6 +694,7 @@ struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescript
 
 	VkPipelineBindPoint pipeBindPoint {}; // only relevant for BindDescriptorSets
 	VkShaderStageFlags stageFlags {}; // only relevant for BindDescriptorSets2
+	void* pNext {};
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override {
@@ -1014,12 +1020,16 @@ struct BindPipelineCmd final : CmdDerive<Command, CommandType::bindPipeline> {
 };
 
 struct PushConstantsCmd final : CmdDerive<Command, CommandType::pushConstants> {
-	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
+	PipelineLayout* pipeLayout; // kept alive via shared ptr in CommandBuffer
 	VkShaderStageFlags stages {};
 	u32 offset {};
 	span<std::byte> values;
+	bool v2 {};
+	void* pNext {};
 
-	std::string_view nameDesc() const override { return "PushConstants"; }
+	std::string_view nameDesc() const override {
+		return v2 ? "PushConstants2" : "PushConstants";
+	}
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 };
@@ -1170,6 +1180,7 @@ struct PushDescriptorSetCmd final : CmdDerive<Command, CommandType::pushDescript
 
 	VkPipelineBindPoint bindPoint {}; // only relevant for PushDescriptorSet
 	VkShaderStageFlags stages {}; // only relevant for PushDescriptorSet2
+	void* pNext {};
 
 	// The individual pImageInfo, pBufferInfo, pTexelBufferView arrays
 	// are allocated in the CommandRecord-owned memory as well.
@@ -1189,8 +1200,13 @@ struct PushDescriptorSetWithTemplateCmd final : CmdDerive<Command, CommandType::
 	u32 set {};
 	span<const std::byte> data;
 
+	bool v2 {};
+	void* pNext{};
+
 	Category category() const override { return Category::bind; }
-	std::string_view nameDesc() const override { return "PushDescriptorSetWithTemplate"; }
+	std::string_view nameDesc() const override {
+		return v2 ? "PushDescriptorSetWithTemplate2" : "PushDescriptorSetWithTemplate2";
+	}
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 };
 
@@ -1605,6 +1621,8 @@ struct GeneratedCommandsInfo {
 };
 
 // TODO: make this parent command?
+VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info);
+
 struct ExecuteGeneratedCommandsCmd final : CmdDerive<Command, CommandType::executeGeneratedCommands> {
 	bool isPreprocessed {};
 	GeneratedCommandsInfo info {};
@@ -1809,6 +1827,47 @@ struct SetDepthBias2Cmd final : CmdDerive<Command, CommandType::setDepthBias2> {
 	Category category() const override { return Category::bind; }
 };
 
+// VK_EXT_descriptor_buffer
+struct BindDescriptorBuffersCmd final : CmdDerive<Command, CommandType::bindDescriptorBuffers> {
+	span<VkDescriptorBufferBindingInfoEXT> buffers;
+
+	std::string_view nameDesc() const override { return "BindDescriptorBuffers"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct SetDescriptorBufferOffsetsCmd final : CmdDerive<Command, CommandType::setDescriptorBufferOffsets> {
+	PipelineLayout* pipeLayout {};
+	u32 firstSet {};
+	span<u32> bufferIndices {};
+	span<VkDeviceSize> offsets {};
+
+	VkPipelineBindPoint bindPoint {}; // only for v1
+	VkShaderStageFlags stages {}; // only for v2
+	void* pNext {};
+
+	std::string_view nameDesc() const override {
+		return stages ? "SetDescriptorBufferOffsets2" : "SetDescriptorBufferOffsets";
+	}
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct BindDescriptorBufferEmbeddedSamplersCmd final : CmdDerive<Command, CommandType::bindDescriptorBufferEmbeddedSamplers> {
+	PipelineLayout* pipeLayout {};
+	u32 set {};
+
+	VkPipelineBindPoint bindPoint {}; // only for v1
+	VkShaderStageFlags stages {}; // only for v2
+	void* pNext {};
+
+	std::string_view nameDesc() const override {
+		return stages ? "BindDescriptorBufferEmbeddedSamplers2" : "BindDescriptorBufferEmbeddedSamplers";
+	}
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
 
 // F: overloaded function type of signature void(<Command Types>*)
 // Will call f with cmd casted to the type indicated by cmdType.
@@ -1944,6 +2003,9 @@ auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	case CT::setLineStippleEnable: return f(static_cast<SetLineStippleEnableCmd*>(cmd));
 	case CT::setDepthClipNegativeOneToOneEXT: return f(static_cast<SetDepthClipNegativeOneToOneEXTCmd*>(cmd));
 	case CT::setDepthBias2: return f(static_cast<SetDepthBias2Cmd*>(cmd));
+	case CT::bindDescriptorBuffers: return f(static_cast<BindDescriptorBuffersCmd*>(cmd));
+	case CT::setDescriptorBufferOffsets: return f(static_cast<SetDescriptorBufferOffsetsCmd*>(cmd));
+	case CT::bindDescriptorBufferEmbeddedSamplers: return f(static_cast<BindDescriptorBufferEmbeddedSamplersCmd*>(cmd));
 	case CT::count:
 		dlg_error("Invalid command type");
 	// NOTE: no default case by design so that we get compiler warnings about

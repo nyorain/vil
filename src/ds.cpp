@@ -2057,4 +2057,65 @@ VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSupport(
 	dev.dispatch.GetDescriptorSetLayoutSupport(dev.handle, &nci, pSupport);
 }
 
+// VK_EXT_descriptor_buffer
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSizeEXT(
+		VkDevice                                    device,
+		VkDescriptorSetLayout                       vklayout,
+		VkDeviceSize*                               pLayoutSizeInBytes) {
+	auto& layout = get(device, vklayout);
+	auto& dev = *layout.dev;
+	return dev.dispatch.GetDescriptorSetLayoutSizeEXT(dev.handle,
+		layout.handle, pLayoutSizeInBytes);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutBindingOffsetEXT(
+		VkDevice                                    device,
+		VkDescriptorSetLayout                       vklayout,
+		uint32_t                                    binding,
+		VkDeviceSize*                               pOffset) {
+	auto& layout = get(device, vklayout);
+	auto& dev = *layout.dev;
+	return dev.dispatch.GetDescriptorSetLayoutBindingOffsetEXT(dev.handle,
+		layout.handle, binding, pOffset);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetDescriptorEXT(
+		VkDevice                                    device,
+		const VkDescriptorGetInfoEXT*               pDescriptorInfo,
+		size_t                                      dataSize,
+		void*                                       pDescriptor) {
+	auto& dev = getDevice(device);
+	auto info = *pDescriptorInfo;
+	VkDescriptorImageInfo imgInfo;
+	switch (info.type) {
+		case VK_DESCRIPTOR_TYPE_SAMPLER:
+			info.data.pSampler = &get(device, *info.data.pSampler).handle;
+			break;
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			imgInfo = *info.data.pSampledImage;
+			if (imgInfo.imageView) {
+				imgInfo.imageView = get(device, imgInfo.imageView).handle;
+			}
+			if (imgInfo.sampler) {
+				imgInfo.sampler = get(device, imgInfo.sampler).handle;
+			}
+			info.data.pSampledImage = &imgInfo;
+			break;
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+		case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+		case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+			// nop, just address referenced
+			break;
+		default:
+			dlg_error("Unsupported descriptor type");
+			break;
+	}
+
+	dev.dispatch.GetDescriptorEXT(dev.handle, &info, dataSize, pDescriptor);
+}
+
 } // namespace vil

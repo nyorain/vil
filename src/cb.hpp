@@ -1051,4 +1051,34 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias2EXT(
     VkCommandBuffer                             commandBuffer,
     const VkDepthBiasInfoEXT*                   pDepthBiasInfo);
 
+// VK_EXT_descriptor_buffer
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBuffersEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    bufferCount,
+    const VkDescriptorBufferBindingInfoEXT*     pBindingInfos);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsetsEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkPipelineBindPoint                         pipelineBindPoint,
+    VkPipelineLayout                            layout,
+    uint32_t                                    firstSet,
+    uint32_t                                    setCount,
+    const uint32_t*                             pBufferIndices,
+    const VkDeviceSize*                         pOffsets);
+
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplersEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkPipelineBindPoint                         pipelineBindPoint,
+    VkPipelineLayout                            layout,
+    uint32_t                                    set);
+
+//  + maintenance6
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsets2EXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkSetDescriptorBufferOffsetsInfoEXT*  pSetDescriptorBufferOffsetsInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplers2EXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkBindDescriptorBufferEmbeddedSamplersInfoEXT* pBindDescriptorBufferEmbeddedSamplersInfo);
+
 } // namespace vil
