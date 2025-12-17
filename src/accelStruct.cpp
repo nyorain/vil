@@ -360,18 +360,21 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	VkAccelerationStructureDeviceAddressInfoKHR devAddressInfo {};
 	devAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
 	devAddressInfo.accelerationStructure = accelStruct.handle;
-	accelStruct.deviceAddress = dev.dispatch.GetAccelerationStructureDeviceAddressKHR(
-		dev.handle, &devAddressInfo);
-	dlg_assert(accelStruct.deviceAddress);
 
 	*pAccelerationStructure = castDispatch<VkAccelerationStructureKHR>(accelStruct);
 	dev.accelStructs.mustEmplace(std::move(accelStructPtr));
 
-	{
-		std::lock_guard lock(dev.mutex);
-		auto [_, success] = dev.accelStructAddresses.insert({
-			accelStruct.deviceAddress, &accelStruct});
-		dlg_assert(success);
+	if (accelStruct.buf->ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		accelStruct.deviceAddress = dev.dispatch.GetAccelerationStructureDeviceAddressKHR(
+			dev.handle, &devAddressInfo);
+		dlg_assert(accelStruct.deviceAddress);
+
+		{
+			std::lock_guard lock(dev.mutex);
+			auto [_, success] = dev.accelStructAddresses.insert({
+				accelStruct.deviceAddress, &accelStruct});
+			dlg_assert(success);
+		}
 	}
 
 	return res;
@@ -379,8 +382,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 
 void AccelStruct::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
-	dlg_assert(deviceAddress);
-	dev->accelStructAddresses.erase(deviceAddress);
+	if(deviceAddress) {
+		dev->accelStructAddresses.erase(deviceAddress);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
@@ -498,7 +502,25 @@ VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetAccelerationStructureDeviceAddressKHR(
 	auto fwd = *pInfo;
 	fwd.accelerationStructure = accelStruct.handle;
 
-	return dev.dispatch.GetAccelerationStructureDeviceAddressKHR(dev.handle, &fwd);
+	auto address = dev.dispatch.GetAccelerationStructureDeviceAddressKHR(dev.handle, &fwd);
+
+	if (accelStruct.deviceAddress != address) {
+		// this is a big issue, try to recover somewhat
+		dlg_error("unexpected address difference: {} vs {}",
+			accelStruct.deviceAddress, address);
+
+		if (!accelStruct.deviceAddress) {
+			accelStruct.deviceAddress = address;
+
+			// was likely not inserted before
+			std::lock_guard lock(dev.mutex);
+			auto [_, success] = dev.accelStructAddresses.insert({
+				accelStruct.deviceAddress, &accelStruct});
+			dlg_assert(success);
+		}
+	}
+
+	return address;
 }
 
 VKAPI_ATTR void VKAPI_CALL GetDeviceAccelerationStructureCompatibilityKHR(

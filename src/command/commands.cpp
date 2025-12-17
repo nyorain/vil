@@ -24,8 +24,6 @@
 #include <imgui/imgui_internal.h>
 #include <vk/format_utils.h>
 #include <vkutil/enumString.hpp>
-#include <iomanip>
-#include <filesystem>
 
 namespace vil {
 
@@ -35,7 +33,7 @@ auto rawHandles(ThreadMemScope& scope, const C& handles) {
 	using VkH = decltype(handles[0]->handle);
 	auto ret = scope.alloc<VkH>(handles.size());
 	for(auto i = 0u; i < handles.size(); ++i) {
-		ret[i] = handles[i]->handle;
+		ret[i] = handles[i] ? handles[i]->handle : VK_NULL_HANDLE;
 	}
 
 	return ret;
@@ -2277,8 +2275,12 @@ void SetDepthClampRangeCmd::record(const Device& dev, VkCommandBuffer cb, u32) c
 VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info) {
 	VkGeneratedCommandsInfoEXT fwd {};
 	fwd.sType = VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT;
-	fwd.indirectCommandsLayout = info.layout->handle;
-	fwd.indirectExecutionSet = info.execSet->handle;
+	if (info.layout) {
+		fwd.indirectCommandsLayout = info.layout->handle;
+	}
+	if (info.execSet) {
+		fwd.indirectExecutionSet = info.execSet->handle;
+	}
 	fwd.indirectAddress = info.indirectAddress;
 	fwd.indirectAddressSize = info.indirectSize;
 	fwd.preprocessAddress = info.preprocessAddress;
@@ -2293,6 +2295,7 @@ VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info) {
 
 void ExecuteGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto fwd = convert(this->info);
+	fwd.pNext = pNext;
 	// dev.dispatch.CmdExecuteGeneratedCommandsEXT(cb, isPreprocessed, &fwd);
 	// See PreprocessGeneratedCommandsCmd::record for reasoning of always
 	// passing false here
@@ -2301,6 +2304,8 @@ void ExecuteGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, 
 
 void PreprocessGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto fwd = convert(this->info);
+	fwd.pNext = pNext;
+
 	// NOTE: this is difficult! the application is only required to
 	// keep the 'state' commandBuffer alive while recording, not for submission.
 	// We cannot rely on this being alive here when recording later on in hook.
@@ -2308,7 +2313,10 @@ void PreprocessGeneratedCommandsCmd::record(const Device& dev, VkCommandBuffer c
 	// - keep the handle alive (ugly)
 	// - make this a no-op and always pass true in ExecuteGeneratedCommands? (ugly)
 	// we have chosen the last option for now, as it's simpler
-	dev.dispatch.CmdPreprocessGeneratedCommandsEXT(cb, &fwd, state->handle);
+	// dev.dispatch.CmdPreprocessGeneratedCommandsEXT(cb, &fwd, state->handle);
+	(void) dev;
+	(void) cb;
+	(void) fwd;
 }
 
 // VK_EXT_extended_dynamic_state3

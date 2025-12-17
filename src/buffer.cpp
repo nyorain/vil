@@ -60,7 +60,9 @@ void Buffer::onApiDestroy() {
 	MemoryResource::onApiDestroy();
 
 	std::lock_guard lock(dev->mutex);
-	if(ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+	const bool allowAddress = ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	dlg_assert(!deviceAddress || allowAddress);
+	if(deviceAddress) {
 		dev->bufferAddresses.erase(this);
 	}
 
@@ -346,13 +348,14 @@ VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetBufferDeviceAddress(
 	fwd.buffer = buf.handle;
 	auto ret = buf.dev->dispatch.GetBufferDeviceAddress(buf.dev->handle, &fwd);
 
+	// TODO: technically, we have to lock here
 	if(ret != buf.deviceAddress) {
 		// This is a sign of a serious problem.
 		dlg_assertm(!buf.deviceAddress, "Inconsistent/Unknown device address retrieved");
 
+		auto& dev = *buf.dev;
+		std::lock_guard lock(dev.mutex);
 		if (!buf.deviceAddress) {
-			auto& dev = *buf.dev;
-			std::lock_guard lock(dev.mutex);
 			buf.deviceAddress = ret;
 			dev.bufferAddresses.insert(&buf);
 		}

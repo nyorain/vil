@@ -15,6 +15,7 @@
 #include <sync.hpp>
 #include <cb.hpp>
 #include <queryPool.hpp>
+#include <gencmd.hpp>
 #include <vkutil/enumString.hpp>
 
 namespace vil {

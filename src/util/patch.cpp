@@ -1425,6 +1425,8 @@ vku::Pipeline createPatchCopy(const RayTracingPipeline& src,
 	groupMapping.ensure(dev, handleSize * src.groups.size() * 2,
 		usage, {}, "patchedShaderTable");
 
+	ensureGroupHandles(const_cast<RayTracingPipeline&>(src));
+
 	// we sort the mappings by key lexicographical order
 	// that makes patching in the shader later much more efficient
 	// see shaderTable.comp
