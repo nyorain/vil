@@ -107,6 +107,7 @@ struct Device {
 
 	// Whether we are in integration testing mode
 	bool testing {};
+	bool hookRecordOnEnd {};
 
 	// Whether indirect vertex copy is enabled.
 	// Will modify usage flags resources are created with

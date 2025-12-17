@@ -1626,6 +1626,7 @@ VkGeneratedCommandsInfoEXT convert(const GeneratedCommandsInfo& info);
 struct ExecuteGeneratedCommandsCmd final : CmdDerive<Command, CommandType::executeGeneratedCommands> {
 	bool isPreprocessed {};
 	GeneratedCommandsInfo info {};
+	void* pNext {};
 
 	std::string_view nameDesc() const override { return "ExecuteGeneratedCommands"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
@@ -1635,6 +1636,7 @@ struct ExecuteGeneratedCommandsCmd final : CmdDerive<Command, CommandType::execu
 struct PreprocessGeneratedCommandsCmd final : CmdDerive<Command, CommandType::preprocessGeneratedCommands> {
 	GeneratedCommandsInfo info {};
 	CommandBuffer* state {};
+	void* pNext {};
 
 	std::string_view nameDesc() const override { return "PreprocessGeneratedCommands"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;

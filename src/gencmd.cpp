@@ -5,8 +5,34 @@
 #include <pipe.hpp>
 #include <ds.hpp>
 #include <threadContext.hpp>
+#include <util/chain.hpp>
 
 namespace vil {
+
+// ugly, should be integrated into util/chain.hpp functions
+void patchIndirectExecutionChain(LinAllocator& alloc, Device& dev, void* pNext) {
+	auto next = static_cast<VkBaseOutStructure*>(pNext);
+	while(next) {
+		if(next->sType == VK_STRUCTURE_TYPE_GENERATED_COMMANDS_SHADER_INFO_EXT) {
+			auto* shaders = reinterpret_cast<VkGeneratedCommandsShaderInfoEXT*>(next);
+			auto shadersCopy = alloc.copy(shaders->pShaders, shaders->shaderCount);
+			for(auto& shader : shadersCopy) {
+				if(shader) {
+					shader = get(dev, shader).handle;
+				}
+			}
+
+			shaders->pShaders = shadersCopy.data();
+		} else if(next->sType == VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT) {
+			auto* pipe = reinterpret_cast<VkGeneratedCommandsPipelineInfoEXT*>(next);
+			if(pipe->pipeline) {
+				pipe->pipeline = get(dev, pipe->pipeline).handle;
+			}
+		}
+
+		next = next->pNext;
+	}
+}
 
 IndirectCommandsLayout::~IndirectCommandsLayout() = default;
 
@@ -17,8 +43,18 @@ VKAPI_ATTR void VKAPI_CALL GetGeneratedCommandsMemoryRequirementsEXT(
 	auto& dev = getDevice(device);
 
 	auto info = *pInfo;
-	info.indirectCommandsLayout = get(device, pInfo->indirectCommandsLayout).handle;
-	info.indirectExecutionSet = get(device, pInfo->indirectExecutionSet).handle;
+	if (info.indirectCommandsLayout) {
+		info.indirectCommandsLayout = get(device, pInfo->indirectCommandsLayout).handle;
+	}
+	if (info.indirectExecutionSet) {
+		info.indirectExecutionSet = get(device, pInfo->indirectExecutionSet).handle;
+	}
+
+	// unwrap pipe/shader handles
+	ThreadMemScope tms;
+	auto copied = copyChainLocal(tms, info.pNext);
+	info.pNext = copied;
+	patchIndirectExecutionChain(tms.customUse(), dev, copied);
 
 	return dev.dispatch.GetGeneratedCommandsMemoryRequirementsEXT(device,
 		&info, pMemoryRequirements);
@@ -31,8 +67,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateIndirectCommandsLayoutEXT(
 		VkIndirectCommandsLayoutEXT*                pIndirectCommandsLayout) {
 	auto& dev = getDevice(device);
 	auto nci = *pCreateInfo;
-	auto& pipeLayout = get(device, nci.pipelineLayout);
-	nci.pipelineLayout = pipeLayout.handle;
+
+	PipelineLayout* pipeLayout {};
+	if (nci.pipelineLayout) {
+		pipeLayout = &get(device, nci.pipelineLayout);
+		nci.pipelineLayout = pipeLayout->handle;
+	}
 
 	auto res = dev.dispatch.CreateIndirectCommandsLayoutEXT(dev.handle,
 		&nci, pAllocator, pIndirectCommandsLayout);
@@ -40,14 +80,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateIndirectCommandsLayoutEXT(
 		return res;
 	}
 
-	auto& cmdLayout = dev.indirectCommandsLayouts.add(*pIndirectCommandsLayout);
+	auto cmdLayoutPtr = IntrusivePtr<IndirectCommandsLayout>(new IndirectCommandsLayout());
+	auto& cmdLayout = *cmdLayoutPtr;
 	cmdLayout.dev = &dev;
-	cmdLayout.pipeLayout.reset(&pipeLayout);
+	cmdLayout.pipeLayout.reset(pipeLayout);
 	cmdLayout.handle = *pIndirectCommandsLayout;
 	cmdLayout.tokens = {pCreateInfo->pTokens, pCreateInfo->pTokens + pCreateInfo->tokenCount};
 	cmdLayout.stride = pCreateInfo->indirectStride;
 	cmdLayout.flags = pCreateInfo->flags;
+
 	*pIndirectCommandsLayout = castDispatch<VkIndirectCommandsLayoutEXT>(cmdLayout);
+	dev.indirectCommandsLayouts.mustEmplace(*pIndirectCommandsLayout, std::move(cmdLayoutPtr));
 
 	return res;
 }
@@ -58,7 +101,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyIndirectCommandsLayoutEXT(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto cmdLayoutPtr = mustMoveUnset(device, indirectCommandsLayout);
 	cmdLayoutPtr->dev->dispatch.DestroyIndirectCommandsLayoutEXT(
-		cmdLayoutPtr->dev->handle, cmdLayoutPtr->handle, pAllocator);
+		cmdLayoutPtr->dev->handle, indirectCommandsLayout, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateIndirectExecutionSetEXT(
@@ -83,16 +126,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateIndirectExecutionSetEXT(
 		nci.info.pShaderInfo = &shaderInfo;
 
 		auto shaders = tms.copy(shaderInfo.pInitialShaders, shaderInfo.maxShaderCount);
-		auto layoutInfos = tms.copy(shaderInfo.pSetLayoutInfos, shaderInfo.maxShaderCount);
+
+		span<VkIndirectExecutionSetShaderLayoutInfoEXT> layoutInfos;
+		if (shaderInfo.pSetLayoutInfos) {
+			layoutInfos = tms.copy(shaderInfo.pSetLayoutInfos, shaderInfo.maxShaderCount);
+		}
 
 		for(auto i = 0u; i < shaderInfo.maxShaderCount; ++i) {
 			shaders[i] = get(device, shaders[i]).handle;
 
-			auto dsLayouts = tms.copy(layoutInfos[i].pSetLayouts, layoutInfos[i].setLayoutCount);
-			for (auto& dsLayout : dsLayouts) {
-				dsLayout = get(device, dsLayout).handle;
+			if (!layoutInfos.empty()) {
+				auto dsLayouts = tms.copy(layoutInfos[i].pSetLayouts, layoutInfos[i].setLayoutCount);
+				for (auto& dsLayout : dsLayouts) {
+					dsLayout = get(device, dsLayout).handle;
+				}
+				layoutInfos[i].pSetLayouts = dsLayouts.data();
 			}
-			layoutInfos[i].pSetLayouts = dsLayouts.data();
 		}
 
 		shaderInfo.pInitialShaders = shaders.data();
@@ -107,11 +156,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateIndirectExecutionSetEXT(
 		return res;
 	}
 
-	auto& cmdLayout = dev.indirectExecutionSets.add(*pIndirectExecutionSet);
-	cmdLayout.dev = &dev;
+	auto exeSetPtr = IntrusivePtr<IndirectExecutionSet>(new IndirectExecutionSet());
+	auto& exeSet = *exeSetPtr;
+	exeSet.dev = &dev;
+	exeSet.handle = *pIndirectExecutionSet;
 	// TODO: remember unwrapped creation info
-	cmdLayout.handle = *pIndirectExecutionSet;
-	*pIndirectExecutionSet = castDispatch<VkIndirectExecutionSetEXT>(cmdLayout);
+
+	*pIndirectExecutionSet = castDispatch<VkIndirectExecutionSetEXT>(exeSet);
+	dev.indirectExecutionSets.mustEmplace(*pIndirectExecutionSet, std::move(exeSetPtr));
 
 	return res;
 }
@@ -122,7 +174,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyIndirectExecutionSetEXT(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto cmdLayoutPtr = mustMoveUnset(device, indirectExecutionSet);
 	cmdLayoutPtr->dev->dispatch.DestroyIndirectExecutionSetEXT(
-		cmdLayoutPtr->dev->handle, cmdLayoutPtr->handle, pAllocator);
+		cmdLayoutPtr->dev->handle, indirectExecutionSet, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL UpdateIndirectExecutionSetPipelineEXT(

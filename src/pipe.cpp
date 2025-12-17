@@ -89,6 +89,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			nci.basePipelineHandle = basePipe.handle;
 		}
 
+		auto* flags2Info = findChainInfo<VkPipelineCreateFlags2CreateInfo,
+				VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO>(nci);
+		auto flags2 = flags2Info ? flags2Info->flags : u64(0u);
+
 		auto& pre = pres[i];
 
 		if(nci.renderPass) {
@@ -102,6 +106,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		// TODO: support it for non-multiview dynamic rendering
 		auto useXfb = dev.transformFeedback &&
 			pre.rp &&
+			!(flags2 & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) &&
 			!hasChain(pre.rp->desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 
 		auto& stages = stagesVecs.emplace_back();
@@ -337,7 +342,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		// might be set to invalid pointer.
 		pipe.needsColorBlend =
 			colorAttachmentCount != 0u &&
-			!pci.pRasterizationState->rasterizerDiscardEnable;
+			pci.pRasterizationState && !pci.pRasterizationState->rasterizerDiscardEnable;
 		if(pipe.needsColorBlend) {
 			dlg_assert(pci.pColorBlendState);
 			if(pci.pColorBlendState) {
@@ -717,15 +722,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		nci.flags |= VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	}
 
+	VkResult res;
 	{
 		ZoneScopedN("dispatch");
-		auto res = dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
+		res = dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
 			deferredOperation, pipelineCache, createInfoCount, ncis.data(),
 			pAllocator, pPipelines);
 		if(res != VK_SUCCESS &&
 				res != VK_OPERATION_NOT_DEFERRED_KHR &&
 				res != VK_OPERATION_DEFERRED_KHR &&
-				res != VK_PIPELINE_COMPILE_REQUIRED_EXT) {
+				res != VK_PIPELINE_COMPILE_REQUIRED) {
 			dlg_trace("CreateRayTracingPipelinesKHR returned {} ({})", vk::name(res), res);
 			return res;
 		}
@@ -761,10 +767,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		}
 
 		dlg_assert(dev.rtProps.shaderGroupHandleSize);
-		pipe.groupHandles.resize(dev.rtProps.shaderGroupHandleSize * ci.groupCount);
-		VK_CHECK(dev.dispatch.GetRayTracingShaderGroupHandlesKHR(dev.handle,
-			pipe.handle, 0u, ci.groupCount, pipe.groupHandles.size(),
-			pipe.groupHandles.data()));
 
 		for(auto i = 0u; i < ci.groupCount; ++i) {
 			auto& src = ci.pGroups[i];
@@ -783,7 +785,25 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		dev.pipes.mustEmplace(pPipelines[i], std::move(newPipePtr));
 	}
 
-	return VK_SUCCESS;
+	return res;
+}
+
+void ensureGroupHandles(RayTracingPipeline& pipe) {
+	// TODO: check and do if VK_EXT_pipeline_library_group_handles feature is enabled
+	//  is a check like this still needed?
+	// if (!(ci.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)) {
+
+	auto& dev = *pipe.dev;
+	std::lock_guard lock(dev.mutex);
+
+	if (!pipe.groups.empty()) {
+		return;
+	}
+
+	pipe.groupHandles.resize(dev.rtProps.shaderGroupHandleSize * pipe.groups.size());
+	VK_CHECK(dev.dispatch.GetRayTracingShaderGroupHandlesKHR(dev.handle,
+		pipe.handle, 0u, pipe.groups.size(), pipe.groupHandles.size(),
+			pipe.groupHandles.data()));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(

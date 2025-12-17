@@ -1,4 +1,6 @@
-- [ ] try to enable bufferDeviceAddress
+- [ ] support ray tracing pipeline libraries
+	- [ ] for shader patching
+- [ ] try to enable bufferDeviceAddress if possible
 - [ ] fix errors with validation tests
 	- [ ] document how to run validation tests
 - [ ] when VIL_SKIP_EXT_CHECK is set (or other env var?) override supported

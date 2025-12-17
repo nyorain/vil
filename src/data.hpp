@@ -52,8 +52,11 @@ R& getData(T handle) {
 template<typename T>
 void insertData(T handle, void* data) {
 	std::lock_guard lock(dataMutex);
-	auto [_, success] = dispatchableTable.emplace(handleToU64(handle), data);
-	dlg_assert(success);
+	dlg_trace("insertData {} {}", typeid(handle).name(), handleToU64(handle));
+	// we want to override in question. We just assume that it wasn't properly
+	// cleaned up before.
+	auto [_, newInsert] = dispatchableTable.insert_or_assign(handleToU64(handle), data);
+	dlg_assertm(newInsert, "handle {} already known", handleToU64(handle));
 }
 
 template<typename R, typename T, typename... Args>
@@ -72,6 +75,7 @@ void eraseData(T handle) {
 		return;
 	}
 
+	dlg_trace("eraseData {} {}", typeid(handle).name(), handleToU64(handle));
 	dispatchableTable.erase(it);
 }
 
@@ -85,6 +89,7 @@ std::unique_ptr<R> moveDataOpt(T handle) {
 
 	auto ptr = it->second;
 	dispatchableTable.erase(it);
+	dlg_trace("eraseData {} {}", typeid(handle).name(), handleToU64(handle));
 	return std::unique_ptr<R>(static_cast<R*>(ptr));
 }
 

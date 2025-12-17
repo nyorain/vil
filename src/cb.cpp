@@ -284,6 +284,14 @@ void CommandBuffer::doEnd() {
 
 		lastRecord_ = std::move(builder_.record_);
 	}
+
+	// NOTE: this is just for testing/validation
+	if (dev->hookRecordOnEnd) {
+		std::lock_guard lock(dev->mutex);
+		CommandHookRecord hooked(*dev->commandHook, *lastRecord_,
+			{}, {}, {}, {});
+		hooked.invalid = true;
+	}
 }
 
 void CommandBuffer::popLabelSections() {
@@ -1195,7 +1203,7 @@ span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
 		const VkDeviceSize*                         pStrides, bool v2) {
 
 	dlg_assert(v2 || !pSizes);
-	dlg_assert(v2 || !pOffsets);
+	dlg_assert(v2 || !pStrides);
 
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
@@ -2808,7 +2816,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetFrontFace(
 	auto& cmd = addCmd<SetFrontFaceCmd>(cb);
 	cmd.frontFace = frontFace;
 
-	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle, frontFace);
+	cb.dev->dispatch.CmdSetFrontFace(cb.handle, frontFace);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopology(
@@ -3535,11 +3543,16 @@ VKAPI_ATTR void VKAPI_CALL CmdBindShadersEXT(
 	auto vkShaders = tms.alloc<VkShaderEXT>(stageCount);
 
 	for(auto i = 0u; i < stageCount; ++i) {
-		auto& shader = get(*cb.dev, pShaders[i]);
-		useHandle(cb, cmd, shader);
+		if (pShaders[i]) {
+			auto& shader = get(*cb.dev, pShaders[i]);
+			useHandle(cb, cmd, shader);
 
-		cmd.shaders[i] = &shader;
-		vkShaders[i] = shader.handle;
+			cmd.shaders[i] = &shader;
+			vkShaders[i] = shader.handle;
+		} else {
+			cmd.shaders[i] = nullptr;
+			vkShaders[i] = VK_NULL_HANDLE;
+		}
 	}
 
 	cb.dev->dispatch.CmdBindShadersEXT(cb.handle,
@@ -3872,8 +3885,12 @@ GeneratedCommandsInfo convert(CommandBuffer& cb, Command& cmd,
 	ret.preprocessSize = info.preprocessSize;
 	ret.indirectAddress = info.indirectAddress;
 	ret.indirectSize = info.indirectAddressSize;
-	ret.execSet = &get(dev, info.indirectExecutionSet);
-	ret.layout = &get(dev, info.indirectCommandsLayout);
+	if (info.indirectExecutionSet) {
+		ret.execSet = &get(dev, info.indirectExecutionSet);
+	}
+	if (info.indirectCommandsLayout) {
+		ret.layout = &get(dev, info.indirectCommandsLayout);
+	}
 	ret.maxDrawCount = info.maxDrawCount;
 	ret.stages = info.shaderStages;
 	ret.sequenceCountAddress = info.sequenceCountAddress;
@@ -3898,15 +3915,13 @@ VKAPI_ATTR void VKAPI_CALL CmdPreprocessGeneratedCommandsEXT(
 	cmd.info = convert(cb, cmd, *pGeneratedCommandsInfo);
 	cmd.state = &getCommandBuffer(stateCommandBuffer);
 
-	dlg_assert(!pGeneratedCommandsInfo->pNext);
+	cmd.pNext = copyChain(cb, pGeneratedCommandsInfo->pNext);
+	auto& rec = *cb.builder().record_;
+	patchIndirectExecutionChain(rec.alloc, *cb.dev, cmd.pNext);
 
 	{
 		ExtZoneScopedN("dispatch");
-		// See commends in PreprocessGeneratedCommandsCmd::record
-		// cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
-		auto info = convert(cmd.info);
-		cb.dev->dispatch.CmdPreprocessGeneratedCommandsEXT(cb.handle,
-			&info, cmd.state->handle);
+		cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 	}
 }
 
@@ -3923,7 +3938,9 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteGeneratedCommandsEXT(
 	cmd.info = convert(cb, cmd, *pGeneratedCommandsInfo);
 	cmd.isPreprocessed = isPreprocessed;
 
-	dlg_assert(!pGeneratedCommandsInfo->pNext);
+	cmd.pNext = copyChain(cb, pGeneratedCommandsInfo->pNext);
+	auto& rec = *cb.builder().record_;
+	patchIndirectExecutionChain(rec.alloc, *cb.dev, cmd.pNext);
 
 	{
 		ExtZoneScopedN("dispatch");

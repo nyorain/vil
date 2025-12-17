@@ -15,7 +15,7 @@
 #include <queryPool.hpp>
 #include <rp.hpp>
 #include <accelStruct.hpp>
-#include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <string_view>
@@ -266,39 +266,49 @@ const PipelineTypeImpl PipelineTypeImpl::instance;
 
 // TODO: replace with something like castCommandType?
 static const ObjectTypeHandler* typeHandlers[] = {
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
+	nullptr, // unknown
+	nullptr, // instance
+	nullptr, // physical device
+	nullptr, // device
+	&QueueTypeImpl::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
+	nullptr, // pipeline cache
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
 	&PipelineTypeImpl::instance,
-	&QueueTypeImpl::instance,
-	// NOTE: this one is special, it does not support all operations.
-	// Caller must handle this on their side.
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
 	&DescriptorSetTypeImpl::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
+	// ...
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	// ...
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
+	// ...
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_EXT, ShaderObject, &Device::shaderObjects>::instance,
+	// ...
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT, IndirectCommandsLayout, &Device::indirectCommandsLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_EXECUTION_SET_EXT, IndirectExecutionSet, &Device::indirectExecutionSets>::instance,
 };
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;
 
 const ObjectTypeHandler* ObjectTypeHandler::handler(VkObjectType type) {
 	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == type) {
+		if(handler && handler->objectType() == type) {
 			return handler;
 		}
 	}
@@ -309,13 +319,14 @@ const ObjectTypeHandler* ObjectTypeHandler::handler(VkObjectType type) {
 }
 
 Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID) {
-	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == objectType) {
-			auto* ptr = handler->find(dev, handle, fwdID);
-			if(ptr) {
-				return ptr;
-			}
-		}
+	auto* h = ObjectTypeHandler::handler(objectType);
+	if(!h) {
+		return nullptr;
+	}
+
+	auto* ptr = h->find(dev, handle, fwdID);
+	if(ptr) {
+		return ptr;
 	}
 
 	dlg_info("can't find handle {}, type {}", handle, vk::name(objectType));

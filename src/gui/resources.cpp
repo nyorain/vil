@@ -24,6 +24,7 @@
 #include <sync.hpp>
 #include <queryPool.hpp>
 #include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <util/util.hpp>
 #include <util/buffmt.hpp>
 #include <imgui/imgui_internal.h>
@@ -1541,6 +1542,14 @@ void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
 void ResourceGui::drawDesc(Draw& draw, ShaderObject& sobj) {
 	(void) draw;
 	(void) sobj;
+	imGuiText("TODO");
+}
+
+void ResourceGui::drawDesc(Draw&, IndirectExecutionSet&) {
+	imGuiText("TODO");
+}
+
+void ResourceGui::drawDesc(Draw&, IndirectCommandsLayout&) {
 	imGuiText("TODO");
 }
 

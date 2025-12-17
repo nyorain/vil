@@ -136,6 +136,8 @@ struct RayTracingPipeline : Pipeline {
 	std::unique_ptr<std::byte[]> exts; // copied pnext chain
 };
 
+void ensureGroupHandles(RayTracingPipeline& pipe);
+
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
     VkDevice                                    device,
