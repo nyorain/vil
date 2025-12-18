@@ -43,6 +43,8 @@
 
 #include <vil_api.h>
 
+extern "C" char** environ;
+
 namespace vil {
 
 // Util
@@ -160,6 +162,19 @@ VkResult VKAPI_PTR SetInstanceLoaderDataNOOP(VkInstance, void*) {
 	return VK_SUCCESS;
 }
 
+void printEnvironment() {
+	char **s = ::environ;
+	dlg_trace("Creating instance. Environment:");
+	for (; *s; s++) {
+		dlg_trace("{}", *s);
+	}
+
+	// TODO WIP test for xkbcommon issues with wine
+#ifndef _WIN32
+	// setenv("XLOCALEDIR", "/usr/share/X11/locale", 0);
+#endif // _WIN32
+}
+
 // Instance
 VkResult doCreateInstance(
 		const VkInstanceCreateInfo* ci,
@@ -208,6 +223,8 @@ VkResult doCreateInstance(
 		#endif // _WIN32
 	}
 #endif // DLG_DISABLE
+
+	printEnvironment();
 
 	PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr {};
 	VkLayerInstanceCreateInfo* mutLinkInfo {};
@@ -446,6 +463,70 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	shutdownTracy();
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(
+		VkPhysicalDevice                            phdev,
+		const char*                                 pLayerName,
+		uint32_t*                                   pPropertyCount,
+		VkExtensionProperties*                      pProperties) {
+	dlg_assert(phdev);
+
+	auto* ini = findData<Instance>(phdev);
+	dlg_assert(ini);
+
+	constexpr auto filterExtensions = true;
+	if (!filterExtensions) {
+		return ini->dispatch.EnumerateDeviceExtensionProperties(phdev, pLayerName,
+			pPropertyCount, pProperties);
+	}
+
+	// TODO: always do this?
+	u32 count {};
+	auto res = ini->dispatch.EnumerateDeviceExtensionProperties(phdev,
+		pLayerName, &count, nullptr);
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	std::vector<VkExtensionProperties> props(count);
+	res = ini->dispatch.EnumerateDeviceExtensionProperties(phdev,
+		pLayerName, &count, props.data());
+	if (res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto checkSupport = [&](const VkExtensionProperties& ext) {
+		if (contains(supportedDevExts, ext.extensionName)) {
+			return false;
+		}
+
+		if (contains(unsupportedDevExts, ext.extensionName)) {
+			dlg_info("Filtering out unsupported extension {}", ext.extensionName);
+			return true;
+		}
+
+		dlg_info("Filtering out unknown extension {}", ext.extensionName);
+		return true;
+	};
+	erase_if(props, checkSupport);
+
+	res = VK_SUCCESS;
+	if (pPropertyCount && pProperties) {
+		auto count = props.size();
+		if (*pPropertyCount < count) {
+			res = VK_INCOMPLETE;
+			count = *pPropertyCount;
+		} else {
+			*pPropertyCount = count;
+		}
+
+		std::memcpy(pProperties, props.data(), sizeof(props[0]) * count);
+	} else if (pPropertyCount) {
+		*pPropertyCount = u32(props.size());
+	}
+
+	return res;
+}
+
 // tmp test
 void CmdCuLaunchKernelNVX(
 		VkCommandBuffer                             commandBuffer,
@@ -538,6 +619,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CreateDevice, VK_API_VERSION_1_0),
 	VIL_DEV_HOOK(DestroyDevice, VK_API_VERSION_1_0),
 	VIL_DEV_HOOK(DeviceWaitIdle, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(EnumerateDeviceExtensionProperties, VK_API_VERSION_1_0),
 
 	// queue.hpp
 	VIL_DEV_HOOK(QueueSubmit, VK_API_VERSION_1_0),

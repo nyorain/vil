@@ -285,7 +285,13 @@ void CommandRecordGui::draw(Draw& draw) {
 	//   selected command anymore.
 	updateMode = selector_.updateMode();
 	if(updateMode == UpdateMode::swapchain && !selector_.freezeState && doUpdate) {
-		auto lastPresent = swapchain->frameSubmissions[0].presentID;
+		FrameSubmissions lastFrame;
+		{
+			std::lock_guard lock(dev.mutex);
+			lastFrame = swapchain->frameSubmissions[0];
+		}
+
+		auto lastPresent = lastFrame.presentID;
 		auto statePresent = selector_.hookStateSwapchainPresent();
 		if(!selector_.submission() || lastPresent > statePresent + 5) {
 			auto diff = lastPresent - statePresent;
@@ -299,8 +305,7 @@ void CommandRecordGui::draw(Draw& draw) {
 
 			// force update
 			if(!freezeCommands_) {
-				updateRecords(swapchain->frameSubmissions[0].batches,
-					{}, {}, {});
+				updateRecords(std::move(lastFrame.batches), {}, {}, {});
 			}
 		}
 	}
@@ -702,10 +707,12 @@ void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
 }
 
 void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
+	/*
 	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
 		dlg_warn("how did this happen?");
 		frame_ = swapchain.frameSubmissions[0].batches;
 	}
+	*/
 
 	for(auto b = 0u; b < frame_.size(); ++b) {
 		if(b > 0) {
