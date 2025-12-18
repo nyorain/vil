@@ -1,3 +1,7 @@
+- [ ] fix VIL_ALLOW_UNSUPPORTED_EXTS to not filter out exts
+	- [ ] or add new var for this?
+- [ ] support shader debugging with spirv cross: spirv -> hlsl/glsl decompilation
+	- [ ] support live shader replacement?
 - [ ] support ray tracing pipeline libraries
 	- [ ] for shader patching
 - [ ] try to enable bufferDeviceAddress if possible

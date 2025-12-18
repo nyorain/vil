@@ -2089,20 +2089,24 @@ VKAPI_ATTR void VKAPI_CALL GetDescriptorEXT(
 	VkDescriptorImageInfo imgInfo;
 	switch (info.type) {
 		case VK_DESCRIPTOR_TYPE_SAMPLER:
-			info.data.pSampler = &get(device, *info.data.pSampler).handle;
+			if (info.data.pSampler) {
+				info.data.pSampler = &get(device, *info.data.pSampler).handle;
+			}
 			break;
 		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
 		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
 		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
 		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-			imgInfo = *info.data.pSampledImage;
-			if (imgInfo.imageView) {
-				imgInfo.imageView = get(device, imgInfo.imageView).handle;
+			if (info.data.pSampledImage) {
+				imgInfo = *info.data.pSampledImage;
+				if (imgInfo.imageView) {
+					imgInfo.imageView = get(device, imgInfo.imageView).handle;
+				}
+				if (imgInfo.sampler) {
+					imgInfo.sampler = get(device, imgInfo.sampler).handle;
+				}
+				info.data.pSampledImage = &imgInfo;
 			}
-			if (imgInfo.sampler) {
-				imgInfo.sampler = get(device, imgInfo.sampler).handle;
-			}
-			info.data.pSampledImage = &imgInfo;
 			break;
 		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
 		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
