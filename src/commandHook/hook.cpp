@@ -142,7 +142,8 @@ CommandHook::CommandHook(Device& dev) {
 	hookAccelStructBuilds = checkEnvBinary("VIL_CAPTURE_ACCEL_STRUCTS", true);
 	initImageCopyPipes(dev);
 	initVertexCopy(dev);
-	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+			dev.bufferDeviceAddress) {
 		initAccelStructCopy(dev);
 		initShaderTableHook(dev);
 	}

@@ -860,6 +860,7 @@ VkResult doCreateDevice(
 	dev.enabledFeatures13 = features13;
 
 	dev.windowWaitForSurface = checkEnvBinary("VIL_WAIT_SURFACE", false);
+	dev.hookRecordOnEnd = checkEnvBinary("VIL_CB_TEST_HOOK", true);
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 

@@ -691,7 +691,8 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	while(cmd) {
 		// check if command needs additional, manual hook
 		if(cmd->category() == CommandCategory::buildAccelStruct &&
-				commandHook().hookAccelStructBuilds) {
+				commandHook().hookAccelStructBuilds &&
+				commandHook().accelStructVertCopy_) {
 
 			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);

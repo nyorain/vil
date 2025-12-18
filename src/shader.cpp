@@ -799,11 +799,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		dlg_assert(pShaders[i]);
 
-		auto& mod = dev.shaderObjects.add(pShaders[i]);
+		auto modPtr = IntrusivePtr<ShaderObject>(new ShaderObject());
+		auto& mod = *modPtr;
 		mod.dev = &dev;
 		mod.handle = pShaders[i];
 		mod.dsLayouts = std::move(layoutVecs[i]);
+
 		pShaders[i] = castDispatch<VkShaderEXT>(mod);
+		dev.shaderObjects.mustEmplace(pShaders[i], std::move(modPtr));
 	}
 
 	return VK_SUCCESS;
@@ -819,7 +822,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderEXT(
 
 	auto shaderPtr = mustMoveUnset(device, shader);
 	shaderPtr->dev->dispatch.DestroyShaderEXT(shaderPtr->dev->handle,
-		shaderPtr->handle, pAllocator);
+		shader, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetShaderBinaryDataEXT(

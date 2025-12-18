@@ -404,4 +404,50 @@ VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSupport(
     const VkDescriptorSetLayoutCreateInfo*      pCreateInfo,
     VkDescriptorSetLayoutSupport*               pSupport);
 
+// VK_EXT_descriptor_buffer
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSizeEXT(
+    VkDevice                                    device,
+    VkDescriptorSetLayout                       layout,
+    VkDeviceSize*                               pLayoutSizeInBytes);
+
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutBindingOffsetEXT(
+    VkDevice                                    device,
+    VkDescriptorSetLayout                       layout,
+    uint32_t                                    binding,
+    VkDeviceSize*                               pOffset);
+
+VKAPI_ATTR void VKAPI_CALL GetDescriptorEXT(
+    VkDevice                                    device,
+    const VkDescriptorGetInfoEXT*               pDescriptorInfo,
+    size_t                                      dataSize,
+    void*                                       pDescriptor);
+
+/*
+// TODO
+VKAPI_ATTR VkResult VKAPI_CALL GetBufferOpaqueCaptureDescriptorDataEXT(
+    VkDevice                                    device,
+    const VkBufferCaptureDescriptorDataInfoEXT* pInfo,
+    void*                                       pData);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetImageOpaqueCaptureDescriptorDataEXT(
+    VkDevice                                    device,
+    const VkImageCaptureDescriptorDataInfoEXT*  pInfo,
+    void*                                       pData);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetImageViewOpaqueCaptureDescriptorDataEXT(
+    VkDevice                                    device,
+    const VkImageViewCaptureDescriptorDataInfoEXT* pInfo,
+    void*                                       pData);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetSamplerOpaqueCaptureDescriptorDataEXT(
+    VkDevice                                    device,
+    const VkSamplerCaptureDescriptorDataInfoEXT* pInfo,
+    void*                                       pData);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetAccelerationStructureOpaqueCaptureDescriptorDataEXT(
+    VkDevice                                    device,
+    const VkAccelerationStructureCaptureDescriptorDataInfoEXT* pInfo,
+    void*                                       pData);
+*/
+
 } // namespace vil

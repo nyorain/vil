@@ -1,9 +1,19 @@
-- [ ] try to enable bufferDeviceAddress
+- [ ] fix VIL_ALLOW_UNSUPPORTED_EXTS to not filter out exts
+	- [ ] or add new var for this?
+- [ ] support shader debugging with spirv cross: spirv -> hlsl/glsl decompilation
+	- [ ] support live shader replacement?
+- [ ] support ray tracing pipeline libraries
+	- [ ] for shader patching
+- [ ] try to enable bufferDeviceAddress if possible
 - [ ] fix errors with validation tests
 	- [ ] document how to run validation tests
 - [ ] when VIL_SKIP_EXT_CHECK is set (or other env var?) override supported
       extensions in that function. Investigate how to make this work.
 	  Can be provided in layer manifest or something?
+
+- [ ] support full and+or expressions for "required" extension field
+      in layer.cpp function list.
+	  e.g. vkCmdSetDescriptorBufferOffsets2EXT: (vulkan1.4|maintenance6) + EXT_descriptor_buffer
 
 - [ ] implement VK_KHR_dynamic_rendering_local_read for core 1.4
 - [ ] impement VK_KHR_pipeline_executable_properties

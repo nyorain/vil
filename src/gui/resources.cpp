@@ -24,6 +24,7 @@
 #include <sync.hpp>
 #include <queryPool.hpp>
 #include <accelStruct.hpp>
+#include <gencmd.hpp>
 #include <util/util.hpp>
 #include <util/buffmt.hpp>
 #include <imgui/imgui_internal.h>
@@ -1544,6 +1545,14 @@ void ResourceGui::drawDesc(Draw& draw, ShaderObject& sobj) {
 	imGuiText("TODO");
 }
 
+void ResourceGui::drawDesc(Draw&, IndirectExecutionSet&) {
+	imGuiText("TODO");
+}
+
+void ResourceGui::drawDesc(Draw&, IndirectCommandsLayout&) {
+	imGuiText("TODO");
+}
+
 void ResourceGui::clearHandles() {
 	auto decRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
 		using HT = std::remove_reference_t<decltype(res)>;
@@ -1567,8 +1576,10 @@ void ResourceGui::clearHandles() {
 
 	// clear selection
 	auto typeHandler = ObjectTypeHandler::handler(filter_);
-	for(auto& handle : handles_) {
-		typeHandler->visit(decRefCountVisitor, *handle);
+	if (typeHandler) {
+		for(auto& handle : handles_) {
+			typeHandler->visit(decRefCountVisitor, *handle);
+		}
 	}
 
 	handles_.clear();
@@ -1618,7 +1629,7 @@ void ResourceGui::updateResourceList() {
 				}
 			}
 		}
-	} else {
+	} else if(typeHandler) {
 		handles_ = typeHandler->resources(dev, search_);
 
 		for(auto& handle : handles_) {
@@ -1664,7 +1675,11 @@ void ResourceGui::draw(Draw& draw) {
 	auto filterName = vil::name(filter_);
 	// ImGui::SetNextItemWidth(150.f);
 	if(ImGui::BeginCombo(ICON_FA_FILTER, filterName)) {
-		for(auto& typeHandler : ObjectTypeHandler::handlers) {
+		for(auto* typeHandler : ObjectTypeHandler::handlers) {
+			if (!typeHandler) {
+				continue;
+			}
+
 			auto filter = typeHandler->objectType();
 			auto name = vil::name(filter);
 			if(ImGui::Selectable(name)) {
@@ -1695,6 +1710,7 @@ void ResourceGui::draw(Draw& draw) {
 
 	// resource list
 	const auto* typeHandler = ObjectTypeHandler::handler(filter_);
+	dlg_assert(typeHandler);
 
 	bool isDestroyed {};
 	auto isDestroyedVisitor = TemplateResourceVisitor([&](auto& res) {
@@ -1888,7 +1904,7 @@ void ResourceGui::drawHandleDesc(Draw& draw) {
 		}
 	} else {
 		for(auto& handler : ObjectTypeHandler::handlers) {
-			if(handler->objectType() == filter_) {
+			if(handler && handler->objectType() == filter_) {
 				handler->visit(visitor, *handle_);
 			}
 		}

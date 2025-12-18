@@ -23,6 +23,9 @@ struct IndirectExecutionSet : public SharedDeviceHandle {
 	VkIndirectExecutionSetEXT handle {};
 };
 
+void patchIndirectExecutionChain(LinAllocator& alloc, Device& dev, void* pNext);
+
+
 // api
 VKAPI_ATTR void VKAPI_CALL GetGeneratedCommandsMemoryRequirementsEXT(
     VkDevice                                    device,

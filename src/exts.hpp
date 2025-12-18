@@ -352,6 +352,7 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_KHR_depth_stencil_resolve",
 	"VK_EXT_vertex_attribute_divisor",
 	"VK_KHR_vertex_attribute_divisor",
+	"VK_EXT_descriptor_buffer",
 };
 
 // Known/look like they might cause problems or crashes.
@@ -402,7 +403,6 @@ constexpr std::string_view unsupportedDevExts[] = {
 	"VK_KHR_object_refresh", // commands
 	"VK_QCOM_tile_shading", // commands
 	"VK_EXT_metal_objects",
-	"VK_EXT_descriptor_buffer", // TODO!
 	"VK_NV_fragment_shading_rate_enums", // command
 	"VK_NV_ray_tracing_motion_blur", // might work as nop?
 	"VK_EXT_image_compression_control", // image wrapped

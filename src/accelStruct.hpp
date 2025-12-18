@@ -66,7 +66,7 @@ struct AccelStruct : SharedDeviceHandle {
 	Buffer* buf {};
 	VkDeviceSize offset {};
 	VkDeviceSize size {};
-	VkDeviceAddress deviceAddress {};
+	VkDeviceAddress deviceAddress {}; // can be 0
 
 	// The state when all activated and pending submissions are completed.
 	// Synced using device mutex.

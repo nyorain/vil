@@ -1132,6 +1132,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiCheckbox("Hook AccelerationStructures", dev.commandHook->hookAccelStructBuilds);
 		imGuiCheckbox("Print VertexCapture Timings", dev.printVertexCaptureTimings);
 		imGuiCheckbox("Print VertexCapture Metadata", dev.printVertexCaptureMetadata);
+		ImGui::Checkbox("Show cursor", &io_->MouseDrawCursor);
+
 		ImGui::Checkbox("Show debug window", &showDebug);
 	}
 }

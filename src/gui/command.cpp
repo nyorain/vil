@@ -972,7 +972,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		auto* buf = std::get_if<OwnBuffer>(&copiedData->data);
 		if(!buf) {
 			dlg_assert(copiedData->data.index() == 0);
-			imGuiText("Error copying descriptor buffer. See log output");
+			imGuiText("Error copying buffer from descriptor. See log output");
 			return;
 		}
 

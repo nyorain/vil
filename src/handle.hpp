@@ -69,6 +69,8 @@ struct ResourceVisitor {
 	virtual void visit(ShaderModule&) = 0;
 	virtual void visit(AccelStruct&) = 0;
 	virtual void visit(ShaderObject&) = 0;
+	virtual void visit(IndirectCommandsLayout& res) = 0;
+	virtual void visit(IndirectExecutionSet& res) = 0;
 };
 
 template<typename F>
@@ -105,6 +107,8 @@ struct TemplateResourceVisitor : ResourceVisitor {
 	void visit(ShaderModule& res) override { impl(res); }
 	void visit(AccelStruct& res) override { impl(res); }
 	void visit(ShaderObject& res) override { impl(res); }
+	void visit(IndirectCommandsLayout& res) override { impl(res); }
+	void visit(IndirectExecutionSet& res) override { impl(res); }
 };
 
 struct ObjectTypeHandler {
