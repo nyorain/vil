@@ -707,6 +707,7 @@ void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
 }
 
 void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
+	(void) swapchain;
 	/*
 	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
 		dlg_warn("how did this happen?");
