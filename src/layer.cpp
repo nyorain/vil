@@ -43,7 +43,9 @@
 
 #include <vil_api.h>
 
+#if !(defined(_WIN32) && (_MSC_VER >= 1900))
 extern "C" char** environ;
+#endif
 
 namespace vil {
 
@@ -163,7 +165,13 @@ VkResult VKAPI_PTR SetInstanceLoaderDataNOOP(VkInstance, void*) {
 }
 
 void printEnvironment() {
-	char **s = ::environ;
+    char** s;
+#if defined(_WIN32) && (_MSC_VER >= 1900)
+    s = *__p__environ();
+#else
+    s = ::environ;
+#endif
+
 	dlg_trace("Creating instance. Environment:");
 	for (; *s; s++) {
 		dlg_trace("{}", *s);
