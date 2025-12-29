@@ -13,6 +13,7 @@
 #include <device.hpp>
 #include <queue.hpp>
 #include <pipe.hpp>
+#include <shader.hpp>
 #include <memory.hpp>
 #include <threadContext.hpp>
 #include <image.hpp>
@@ -30,7 +31,12 @@
 #include <imgui/imgui_internal.h>
 #include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
+#include <spirv_cross.hpp>
 #include <map>
+
+#ifdef VIL_WITH_SPIRV_TOOLS
+#include <spirv-tools/libspirv.h>
+#endif // VIL_WITH_SPIRV_TOOLS
 
 namespace vil {
 
@@ -1175,8 +1181,32 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 	}
 }
 
-void ResourceGui::drawDesc(Draw&, ShaderModule&) {
-	ImGui::Text("TODO");
+void ResourceGui::drawDesc(Draw&, ShaderModule& mod) {
+#ifdef VIL_WITH_SPIRV_TOOLS
+	if (spirvDisassembly_.empty()) {
+		auto context = spvContextCreate(SPV_ENV_UNIVERSAL_1_6);
+		auto& spirv = mod.compiled->get_ir().spirv;
+		spv_text text;
+		spv_diagnostic diagnostic;
+		auto opts = SPV_BINARY_TO_TEXT_OPTION_INDENT |
+			SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
+		spvBinaryToText(context, spirv.data(), spirv.size(),
+			opts, &text, &diagnostic);
+
+		dlg_assert(!diagnostic);
+		spirvDisassembly_ = {text->str, text->length};
+
+		spirvEdit_.SetReadOnly(true);
+		spirvEdit_.SetText(spirvDisassembly_);
+		spirvEdit_.SetShowWhitespaces(false);
+		spirvEdit_.SetTabSize(4);
+		spirvEdit_.SetLanguageDefinition(igt::TextEditor::LanguageDefinition::SPIRV());
+	}
+
+	ImGui::PushFont(gui_->monoFont);
+	spirvEdit_.Render("SPIR-V");
+	ImGui::PopFont();
+#endif // VIL_WITH_SPIRV_TOOLS
 }
 
 void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
@@ -1651,6 +1681,7 @@ void ResourceGui::clearSelection() {
 	ds_.selected = {};
 	image_.object = {};
 	buffer_.handle = {};
+	spirvDisassembly_ = {};
 }
 
 void ResourceGui::draw(Draw& draw) {

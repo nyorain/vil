@@ -83,6 +83,9 @@ private:
 	Handle* handle_ {};
 	bool editName_ {false};
 
+	std::string spirvDisassembly_;
+	igt::TextEditor spirvEdit_;
+
 	struct {
 		Image* object {};
 		ImageViewer viewer {};

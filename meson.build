@@ -164,6 +164,8 @@ dep_nytl = subproject('nytl', default_options: dopts).get_variable('nytl_dep')
 dep_imgio = subproject('imgio', default_options: dopts).get_variable('imgio_dep')
 dep_spc = subproject('spc', default_options: dopts).get_variable('spc_dep')
 
+dep_spirv_tools = dependency('SPIRV-Tools', required: false)
+
 layer_args += '-DDLG_DEFAULT_TAGS="vil"'
 
 if disable_dlg
@@ -412,6 +414,11 @@ if with_window or with_x11_hook or with_win32 or with_example
 
 		layer_args += '-DVIL_WITH_SWA=1'
 	endif
+endif
+
+if dep_spirv_tools.found()
+	deps += [dep_spirv_tools]
+	layer_args += '-DVIL_WITH_SPIRV_TOOLS=1'
 endif
 
 with_unit_tests = get_option('unit-tests')

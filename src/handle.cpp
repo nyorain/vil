@@ -48,6 +48,9 @@ const char* name(VkObjectType objectType) {
 		case VK_OBJECT_TYPE_FRAMEBUFFER: return "Framebuffer";
 		case VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE: return "DescriptorUpdateTemplate";
 		case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR: return "AccelerationStructure";
+		case VK_OBJECT_TYPE_SHADER_EXT: return "Shader";
+		case VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT: return "IndirectCommandsLayout";
+		case VK_OBJECT_TYPE_INDIRECT_EXECUTION_SET_EXT: return "IndirectExecutionSet";
 		default: return "?";
 	}
 }

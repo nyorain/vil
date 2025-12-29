@@ -205,6 +205,7 @@ public:
 		static const LanguageDefinition& CPlusPlus();
 		static const LanguageDefinition& HLSL();
 		static const LanguageDefinition& GLSLFast();
+		static const LanguageDefinition& SPIRV();
 		static const LanguageDefinition& GLSL();
 		static const LanguageDefinition& C();
 		static const LanguageDefinition& SQL();
