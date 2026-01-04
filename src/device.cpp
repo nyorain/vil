@@ -251,6 +251,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 	// swa whether it should use x11 or wayland; but also have to tell
 	// it whether to use xcb or xlib for window creation).
 	if(standaloneMode) {
+		window->ini = &ini;
 		if(!window->doCreateDisplay()) {
 			return nullptr;
 		}
@@ -1251,6 +1252,7 @@ VkResult doCreateDevice(
 
 		if(standaloneMode) {
 			dev.window->dev = &dev;
+			dev.window->doCreateWindow();
 			dev.window->doInitSwapchain();
 		}
 	}
