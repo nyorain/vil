@@ -1,9 +1,17 @@
 #include <wayland.hpp>
 #include <layer.hpp>
 #include <data.hpp>
-#include "gui.hpp"
+#include <queue.hpp>
+#include <platform.hpp>
+#include <swaPlatform.hpp>
+#include <window.hpp>
+#include <swa/swa.h>
+#include <swa/wayland.h>
+#include <swa/private/wayland.h>
 
 #include "imgui/imgui.h"
+
+#include "subprojects/swa/xdg-foreign-unstable-v2-client-protocol.h"
 
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
@@ -16,7 +24,9 @@ public:
 	WaylandPlatform(wl_display* display, wl_surface* surface);
 	~WaylandPlatform();
 
-	void update() override;
+	State update(Gui& gui) override;
+	void init(Device& dev, unsigned width, unsigned height) override;
+	void resize(unsigned width, unsigned height) override;
 
 	// callbacks
 	static void registryGlobal(void*, wl_registry*, u32 name, const char* interface, u32 version);
@@ -39,6 +49,9 @@ public:
 	static void pointerAxis(void*, wl_pointer*, u32, u32, wl_fixed_t);
 
 public:
+	Device* dev {};
+	std::unique_ptr<DisplayWindow> window;
+
 	wl_display* display {};
 	wl_surface* surface {};
 
@@ -48,6 +61,9 @@ public:
 	wl_seat* seat {};
 	wl_pointer* pointer {};
 	wl_keyboard* keyboard {};
+	zxdg_exporter_v2* exporter {};
+	zxdg_exported_v2* exported {};
+	std::string exportedHandle;
 
 	bool mouseOver {};
 	bool focus {};
@@ -66,19 +82,9 @@ void pointerLeave(void* data, wl_pointer*, u32, wl_surface*) {
 }
 void pointerMotion(void* data, wl_pointer*, u32, wl_fixed_t x, wl_fixed_t y) {
 	auto platform = static_cast<WaylandPlatform*>(data);
-	if(platform->mouseOver) {
-		auto& io = ImGui::GetIO();
-		io.MousePos.x = wl_fixed_to_double(x);
-		io.MousePos.y = wl_fixed_to_double(y);
-	}
 }
 void pointerButton(void* data, wl_pointer*, u32, u32, u32 button, u32 state) {
 	auto platform = static_cast<WaylandPlatform*>(data);
-	auto butid = i32(button) - BTN_LEFT;
-	if(platform->mouseOver && butid >= 0 && butid < 5) {
-		auto& io = ImGui::GetIO();
-		io.MouseDown[butid] = state;
-	}
 }
 
 void pointerAxis(void* data, wl_pointer*, u32, u32, wl_fixed_t val) {
@@ -109,7 +115,37 @@ void keyboardEnter(void*, wl_keyboard*, u32, wl_surface*, wl_array*) {
 }
 void keyboardLeave(void*, wl_keyboard*, u32, wl_surface*) {
 }
-void keyboardKey(void*, wl_keyboard*, u32, u32, u32, u32) {
+void keyboardKey(void*, wl_keyboard* keyboard, u32 serial, u32 time, u32 key, u32 pressed) {
+	dlg_trace("{}: {} (thread {})", key, pressed, std::this_thread::get_id());
+
+	auto* platform = static_cast<WaylandPlatform*>(wl_keyboard_get_user_data(keyboard));
+	if (key == u32(platform->toggleKey_) && pressed) {
+		if (platform->window && platform->window->window) {
+			dlg_trace("destroy window");
+			platform->window->closeWait();
+		} else if (platform->window) {
+			dlg_trace("create window");
+			platform->window->doCreateWindow();
+			dlg_assert(platform->window->window);
+			if (platform->window->window) {
+				// import
+				if (!platform->exportedHandle.empty()) {
+					auto* dpy = (swa_display_wl*)platform->window->dpy;
+					auto* win = (swa_window_wl*)platform->window->window;
+					if (dpy->xdg_importer) {
+						dlg_trace("set parent");
+						auto* imported = zxdg_importer_v2_import_toplevel(
+							dpy->xdg_importer, platform->exportedHandle.c_str());
+						zxdg_imported_v2_set_parent_of(imported,
+							win->wl_surface);
+					}
+				}
+
+				platform->window->doInitSwapchain();
+				platform->window->startThread();
+			}
+		}
+	}
 }
 void keyboardMods(void*, wl_keyboard*, u32, u32, u32, u32, u32) {
 }
@@ -147,6 +183,17 @@ const struct wl_seat_listener seatListener = {
 	seatName,
 };
 
+void exportedHandle(void *data,
+	   struct zxdg_exported_v2 *zxdg_exported_v2,
+	   const char *handle) {
+	auto platform = static_cast<WaylandPlatform*>(data);
+	dlg_assert(platform->exported == zxdg_exported_v2);
+	platform->exportedHandle = handle;
+}
+
+const struct zxdg_exported_v2_listener exportedListener = {
+	exportedHandle
+};
 
 // registry
 void registryGlobal(void* data, wl_registry*, u32 name, const char* interface, u32 version) {
@@ -158,6 +205,14 @@ void registryGlobal(void* data, wl_registry*, u32 name, const char* interface, u
 		platform->seat = reinterpret_cast<wl_seat*>(seat);
 		wl_proxy_set_queue(reinterpret_cast<wl_proxy*>(platform->seat), platform->queue);
 		wl_seat_add_listener(platform->seat, &seatListener, platform);
+	} else if (!platform->exporter && !std::strcmp(interface, zxdg_exporter_v2_interface.name)) {
+		auto* exporter = wl_registry_bind(platform->registry, name,
+			&zxdg_exporter_v2_interface, 1u);
+		platform->exporter = reinterpret_cast<zxdg_exporter_v2*>(exporter);
+		platform->exported = zxdg_exporter_v2_export_toplevel(
+			platform->exporter, platform->surface);
+		zxdg_exported_v2_add_listener(platform->exported,
+			&exportedListener, platform);
 	}
 }
 void registryGlobalRemove(void*, wl_registry*, u32) {
@@ -191,15 +246,33 @@ WaylandPlatform::WaylandPlatform(wl_display* display, wl_surface* surface) {
 WaylandPlatform::~WaylandPlatform() {
 }
 
-void WaylandPlatform::update() {
+WaylandPlatform::State WaylandPlatform::update(Gui&) {
 	int res = wl_display_dispatch_queue_pending(display, queue);
 	dlg_assert(res >= 0);
 
 	auto& io = ImGui::GetIO();
 	if(!mouseOver) {
-		io.MousePos.x = -FLT_MAX;
-		io.MousePos.y = -FLT_MAX;
+		// io.MousePos.x = -FLT_MAX;
+		// io.MousePos.y = -FLT_MAX;
 	}
+
+	return State::hidden;
+}
+
+void WaylandPlatform::init(Device& dev, unsigned width, unsigned height) {
+	window = std::make_unique<DisplayWindow>();
+	window->ini = dev.ini;
+	window->dev = &dev;
+	window->dpy = swa_display_wl_create("VIL");
+
+	// TODO:
+	window->presentQueue = dev.gfxQueue;
+
+	dlg_assert(window->dpy);
+	this->dev = &dev;
+}
+
+void WaylandPlatform::resize(unsigned width, unsigned height) {
 }
 
 // entry point
@@ -210,12 +283,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 		VkSurfaceKHR*                               pSurface) {
 	auto& ini = getData<Instance>(instance);
 	ini.hasSurface.store(true);
-	auto res = ini.dispatch.vkCreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+	auto res = ini.dispatch.CreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	createData<WaylandPlatform>(*pSurface, pCreateInfo->display, pCreateInfo->surface);
+	auto& platform = createData<WaylandPlatform>(*pSurface, pCreateInfo->display, pCreateInfo->surface);
 	dlg_assert(findData(*pSurface));
 	return res;
 }
