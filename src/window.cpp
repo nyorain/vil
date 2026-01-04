@@ -10,9 +10,18 @@
 #include <imgui/imgui.h>
 #include <vkutil/enumString.hpp>
 #include <chrono>
+#include <swa/config.h>
 
 #ifdef SWA_WITH_X11
 #include <swa/x11.h>
+#endif
+
+#ifdef SWA_WITH_WL
+#include <swa/wayland.h>
+#include <swa/private/wayland.h>
+#define namespace namespace_
+#include "subprojects/swa/wlr-layer-shell-unstable-v1-client-protocol.h"
+#undef namespace
 #endif
 
 // NOTE: we know event calls always happen in the same thread as rendering
@@ -73,10 +82,10 @@ void cbMouseWheel(swa_window*, float x, float y) {
 
 // DisplayWindow
 DisplayWindow::~DisplayWindow() {
-	run_.store(false);
-	cv_.notify_all();
-	if(thread_.joinable()) {
-		thread_.join();
+	closeWait();
+
+	if (dpy) {
+		swa_display_destroy(dpy);
 	}
 }
 
@@ -276,7 +285,7 @@ bool DisplayWindow::doInitSwapchain() {
 }
 
 void DisplayWindow::resize(unsigned w, unsigned h) {
-	dlg_trace("resize");
+	dlg_trace("resize: {} {}", w, h);
 
 	auto& dev = *this->dev;
 
@@ -315,6 +324,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	}
 
 	initBuffers();
+	recreateSwapchain_ = false;
 }
 
 void DisplayWindow::initBuffers() {
@@ -442,6 +452,22 @@ bool DisplayWindow::doCreateWindow() {
 	}
 #endif // defined(SWA_WITH_X11)
 
+#if defined(SWA_WITH_WL)
+	swa_ext_wlr_layer extLayer {};
+	if (checkEnvBinary("VIL_WLR_OVERLAY", false)) {
+		extLayer.ext_type = swa_ext_type_wlr_layer;
+		extLayer.layer_namespace = "VIL";
+		extLayer.layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+		extLayer.anchors = ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+			ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+		extLayer.keyboard_interactivity =
+			ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND;
+		extLayer.next = ws.ext;
+
+		ws.ext = (swa_ext_struct*)&extLayer;
+	}
+#endif // defined(SWA_WITH_WL)
+
 	window = swa_display_create_window(dpy, &ws);
 	if(!window) {
 		return false;
@@ -498,14 +524,76 @@ void DisplayWindow::doMainLoop() {
 		}
 	}
 
+#ifdef SWA_WITH_WL
+	if (swa_display_is_wl(dpy)) {
+		gui->platformUI = [this]() {
+			auto* win = (swa_window_wl*)(window);
+			ImGui::Text("Wayland controls");
+			if (win->wlr_layer_surface) {
+				if (ImGui::Button("Top")) {
+					zwlr_layer_surface_v1_set_anchor(win->wlr_layer_surface,
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP);
+					win->height = SWA_FALLBACK_HEIGHT;
+					zwlr_layer_surface_v1_set_size(win->wlr_layer_surface, 0, win->height);
+				}
+
+				if (ImGui::Button("Right")) {
+					zwlr_layer_surface_v1_set_anchor(win->wlr_layer_surface,
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
+					win->width = SWA_FALLBACK_WIDTH;
+					zwlr_layer_surface_v1_set_size(win->wlr_layer_surface, win->width, 0);
+				}
+
+				if (ImGui::Button("Bottom")) {
+					zwlr_layer_surface_v1_set_anchor(win->wlr_layer_surface,
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
+					win->height = SWA_FALLBACK_HEIGHT;
+					zwlr_layer_surface_v1_set_size(win->wlr_layer_surface, 0, win->height);
+				}
+
+				if (ImGui::Button("Left")) {
+					zwlr_layer_surface_v1_set_anchor(win->wlr_layer_surface,
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+						ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
+					win->width = SWA_FALLBACK_WIDTH;
+					zwlr_layer_surface_v1_set_size(win->wlr_layer_surface, win->width, 0);
+				}
+
+				auto sized = false;
+				sized |= ImGui::DragInt("Width", (int*)&win->width, 1, 1, 99999);
+				sized |= ImGui::DragInt("Height", (int*)&win->height, 1, 1, 99999);
+
+				if (sized) {
+					swapchainCreateInfo.imageExtent.width = win->width;
+					swapchainCreateInfo.imageExtent.height = win->height;
+					recreateSwapchain_ = true;
+					zwlr_layer_surface_v1_set_size(win->wlr_layer_surface, win->width, win->height);
+				}
+			}
+		};
+	}
+#endif // SWA_WITH_WAYLAND
+
 	while(run_.load()) {
 		auto now = Clock::now();
 		auto nextIterationTime = now + minIterationTime;
 
-		dlg_trace("dispatch");
+		// dlg_trace("dispatch");
 		if(!swa_display_dispatch(dpy, false)) {
 			run_.store(false);
 			break;
+		}
+
+		if (recreateSwapchain_) {
+			resize(swapchainCreateInfo.imageExtent.width,
+				swapchainCreateInfo.imageExtent.height);
 		}
 
 		if(!run_.load()) {
@@ -521,7 +609,7 @@ void DisplayWindow::doMainLoop() {
 		// would potentially mean less latency since that waiting for
 		// vsync currently effectively happens at the end of Gui::draw
 		// (where we wait for the submission).
-		dlg_trace("acquire");
+		// dlg_trace("acquire");
 		VkResult res = dev->dispatch.AcquireNextImageKHR(dev->handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
@@ -532,6 +620,7 @@ void DisplayWindow::doMainLoop() {
 			// continue;
 		} else if(res == VK_ERROR_OUT_OF_DATE_KHR) {
 			dlg_warn("Got out of date swapchain (acquire)");
+			recreateSwapchain_ = true;
 			continue;
 		} else if(res != VK_SUCCESS) {
 			dlg_error("vkAcquireNextImageKHR: {}", vk::name(res));
@@ -578,14 +667,14 @@ void DisplayWindow::doMainLoop() {
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;
 
-		dlg_trace("renderFrame");
+		// dlg_trace("renderFrame");
 		gui->renderFrame(frameInfo);
 
 		// There is no advantage in having multiple draws pending at
 		// the same time, we don't need to squeeze every last fps
 		// out of the debug window. Waiting here is better than potentially
 		// somewhere in a critical section.
-		dlg_trace("waitForDraws");
+		// dlg_trace("waitForDraws");
 		gui->waitForDraws();
 
 		// NOTE(experimental): we also might wanna limit refreshing of this window
@@ -605,7 +694,7 @@ void DisplayWindow::doMainLoop() {
 
 void DisplayWindow::uiThread() {
 	// initialization
-	{
+	if (state_.load() != State::mainLoop) {
 		std::unique_lock lock(mutex_);
 
 		// step 0: display creation
@@ -631,6 +720,7 @@ void DisplayWindow::uiThread() {
 		}
 
 		// step 1: window creation
+		dlg_assert(state_.load() == State::createWindow);
 		if(!doCreateWindow()) {
 			dlg_error("window creation failed!");
 			state_.store(State::shutdown);
@@ -671,21 +761,38 @@ void DisplayWindow::close() {
 	run_.store(false);
 }
 
+void DisplayWindow::closeWait() {
+	run_.store(false);
+	cv_.notify_all();
+	if(thread_.joinable()) {
+		thread_.join();
+	}
+}
+
 void DisplayWindow::doCleanup() {
 	auto& dev = *this->dev;
 
 	destroyBuffers();
 	if(swapchain) {
 		dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, nullptr);
+		swapchain = {};
 	}
 
 	if(window) {
 		swa_window_destroy(window);
+		window = nullptr;
 	}
 
 	if(acquireSem) {
 		dev.dispatch.DestroySemaphore(dev.handle, acquireSem, nullptr);
+		acquireSem = {};
 	}
+}
+
+void DisplayWindow::startThread() {
+	run_.store(true);
+	state_.store(State::mainLoop);
+	this->thread_ = std::thread([&]{ uiThread(); });
 }
 
 } // namespace vil

@@ -1135,6 +1135,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::Checkbox("Show cursor", &io_->MouseDrawCursor);
 
 		ImGui::Checkbox("Show debug window", &showDebug);
+
+		ImGui::Separator();
+	}
+
+	if (platformUI) {
+		platformUI();
 	}
 }
 

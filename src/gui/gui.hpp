@@ -91,6 +91,8 @@ public:
 	ImVec4 inlineButtonColHovered;
 	ImVec4 inlineButtonColActive;
 
+	std::function<void()> platformUI {};
+
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
 	bool showDebug = false;
