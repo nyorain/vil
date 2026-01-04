@@ -1182,6 +1182,7 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 }
 
 void ResourceGui::drawDesc(Draw&, ShaderModule& mod) {
+	(void) mod;
 #ifdef VIL_WITH_SPIRV_TOOLS
 	if (spirvDisassembly_.empty()) {
 		auto context = spvContextCreate(SPV_ENV_UNIVERSAL_1_6);
