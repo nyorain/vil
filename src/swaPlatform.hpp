@@ -11,6 +11,7 @@ namespace vil {
 // Uses swa to create an input-grabbing, invisible child window on the
 // given platform. Just needs platform-specific mechanisms for checking
 // on the original window.
+// Thin wrapper around the Platform interface, connecting swa to ImGui input.
 struct SwaPlatform : Platform {
 	swa_display* dpy {};
 	swa_window* window {};

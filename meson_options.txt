@@ -3,12 +3,13 @@
 # even when this is false, allows to create overlays via the API or
 # use vil in a separate window on x11
 option('x11-hook', type: 'boolean', value: true)
+option('wl-hook', type: 'boolean', value: true)
 
 # whether to build the example
 option('example', type: 'boolean', value: false)
 
 # whether to build the tests
-# NOTE: due to technical reasons, the tests are compiled into the layer 
+# NOTE: due to technical reasons, the tests are compiled into the layer
 # library itself. Disabling this should slightly decrease the size of the library
 option('unit-tests', type: 'boolean', value: false)
 option('integration-tests', type: 'boolean', value: false)

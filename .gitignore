@@ -11,4 +11,4 @@ docs/traces/
 .vimspector.json
 subprojects/.wraplock
 subprojects/pml.wrap
-.launch
+.gdbinit

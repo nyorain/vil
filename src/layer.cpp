@@ -653,7 +653,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
 #ifdef VIL_WITH_WAYLAND
-	VIL_HOOK_EXT(CreateWaylandSurfaceKHR, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME),
+	VIL_INI_HOOK_EXT(CreateWaylandSurfaceKHR, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME),
 #endif // VIL_WITH_WAYLAND
 
 #ifdef VIL_WITH_X11

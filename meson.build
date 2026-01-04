@@ -107,6 +107,7 @@ endif
 with_win32 = build_machine.system() == 'windows'
 
 with_x11_hook = not with_win32 and get_option('x11-hook')
+with_wl_hook = not with_win32 and get_option('wl-hook')
 
 tracy_deps = []
 
@@ -486,6 +487,14 @@ if with_x11_hook
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
 	args += ['-DVIL_WITH_X11']
+endif
+
+if with_wl_hook
+	src += files('src/wayland.cpp')
+	dep_wl_client = dependency('wayland-client', required: true)
+
+	deps += [dep_wl_client]
+	args += ['-DVIL_WITH_WAYLAND']
 endif
 
 if with_win32
