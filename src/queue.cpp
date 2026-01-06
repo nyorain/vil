@@ -72,14 +72,19 @@ void finish(SubmissionBatch& batch) {
 					// erase the first one, does not matter
 					auto it = std::find(sem.signals.begin(), sem.signals.end(),
 						&SyncOp::swapchainAcquireDummy);
-					dlg_assert(it != sem.signals.end());
-					sem.signals.erase(it);
+					// might have been erased when semaphore is being destroyed
+					dlg_assert(it != sem.signals.end() || sem.handle == VK_NULL_HANDLE);
+					if (it != sem.signals.end()) {
+						sem.signals.erase(it);
+					}
 				}
 			}
 
 			auto it = std::find(sem.waits.begin(), sem.waits.end(), wait.get());
 			dlg_assert(it != sem.waits.end());
-			sem.waits.erase(it);
+			if (it != sem.waits.end()) {
+				sem.waits.erase(it);
+			}
 		}
 
 		// process signals
@@ -100,7 +105,9 @@ void finish(SubmissionBatch& batch) {
 
 			auto it = std::find(sem.signals.begin(), sem.signals.end(), signal.get());
 			dlg_assert(it != sem.signals.end());
-			sem.signals.erase(it);
+			if (it != sem.signals.end()) {
+				sem.signals.erase(it);
+			}
 		}
 	}
 }

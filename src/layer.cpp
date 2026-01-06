@@ -357,7 +357,7 @@ VkResult doCreateInstance(
 	if(checkExts) {
 		for(std::string_view ext : ini.extensions) {
 			if(contains(unsupportedInstanceExts, ext)) {
-				auto str = dlg::format("Application requested device extension '{}' that is "
+				auto str = dlg::format("Application requested instance extension '{}' that is "
 					"explicitly not supported by vil", ext);
 
 				if (!allowUnsupported) {
@@ -369,7 +369,7 @@ VkResult doCreateInstance(
 			}
 
 			if(!contains(supportedInstanceExts, ext)) {
-				dlg_error("Application requested unknown device extension '{}'", ext);
+				dlg_error("Application requested unknown instance extension '{}'", ext);
 			}
 		}
 	}

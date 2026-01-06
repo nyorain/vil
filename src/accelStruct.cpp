@@ -373,7 +373,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 			std::lock_guard lock(dev.mutex);
 			auto [_, success] = dev.accelStructAddresses.insert({
 				accelStruct.deviceAddress, &accelStruct});
-			dlg_assert(success);
+			dlg_assertm(success, "accelStruct address {} already known", accelStruct.deviceAddress);
 		}
 	}
 

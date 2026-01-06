@@ -36,6 +36,7 @@ constexpr std::string_view supportedInstanceExts[] = {
 	"VK_EXT_application_parameters", // nop
 	"VK_LUNARG_direct_driver_loading", // nop
 	"VK_KHR_surface_maintenance1", // nop
+	"VK_EXT_swapchain_colorspace", // nop
 };
 
 constexpr std::string_view unsupportedInstanceExts[] = {
@@ -147,7 +148,6 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_NV_geometry_shader_passthrough",
 	"VK_EXT_conservative_rasterization",
 	"VK_EXT_depth_clip_enable",
-	"VK_EXT_swapchain_colorspace",
 	"VK_EXT_hdr_metadata",
 	"VK_KHR_shared_presentable_image",
 	"VK_KHR_external_fence",
