@@ -447,8 +447,13 @@ bool DisplayWindow::doCreateWindow() {
 #if defined(SWA_WITH_X11)
 	auto hasXCB = contains(ini->extensions, "VK_KHR_xcb_surface");
 	auto hasXlib = contains(ini->extensions, "VK_KHR_xlib_surface");
+	swa_ext_x11_window_settings x11s {};
 	if(hasXlib && !hasXCB) {
-		ws.prefer_xlib = true;
+		x11s.ext_type = swa_ext_type_x11_window_settings;
+		x11s.vk_use_xlib = true;
+		x11s.next = ws.ext;
+
+		ws.ext = (swa_ext_struct*)&x11s;
 	}
 #endif // defined(SWA_WITH_X11)
 
