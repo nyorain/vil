@@ -4,6 +4,10 @@
 #include <util/dlg.hpp>
 #include <gui/gui.hpp>
 
+#ifdef SWA_WITH_X11
+#include <swa/x11.h>
+#endif
+
 // NOTE: we know event calls always happen in the same thread as rendering
 // so we don't need to use gui-internal even queue and can access imguiIO
 // directly
@@ -122,10 +126,16 @@ void SwaPlatform::initWindow(Device& dev, void* nativeParent,
 	ws.height = height;
 	ws.listener = &listener;
 	ws.surface = swa_surface_none;
-	ws.input_only = true;
 	ws.hide = true;
 	ws.parent = nativeParent;
 	ws.cursor.type = swa_cursor_left_pointer;
+
+#if defined(SWA_WITH_X11)
+	swa_ext_x11_window_settings x11s {};
+	x11s.input_only = true;
+	ws.ext = (swa_ext_struct*) &x11s;
+#endif // defined(SWA_WITH_X11)
+
 	window = swa_display_create_window(dpy, &ws);
 	dlg_assert(window);
 
