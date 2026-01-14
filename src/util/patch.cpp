@@ -1427,6 +1427,11 @@ vku::Pipeline createPatchCopy(const RayTracingPipeline& src,
 
 	ensureGroupHandles(const_cast<RayTracingPipeline&>(src));
 
+	if (groupHandles.size() != src.groupHandles.size()) {
+		dlg_error("Group handle mismatch");
+		return {};
+	}
+
 	// we sort the mappings by key lexicographical order
 	// that makes patching in the shader later much more efficient
 	// see shaderTable.comp

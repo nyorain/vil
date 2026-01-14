@@ -481,7 +481,7 @@ VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(
 	auto* ini = findData<Instance>(phdev);
 	dlg_assert(ini);
 
-	constexpr auto filterExtensions = true;
+	const auto filterExtensions = checkEnvBinary("VIL_FILTER_EXTS", true);
 	if (!filterExtensions) {
 		return ini->dispatch.EnumerateDeviceExtensionProperties(phdev, pLayerName,
 			pPropertyCount, pProperties);

@@ -796,7 +796,7 @@ void ensureGroupHandles(RayTracingPipeline& pipe) {
 	auto& dev = *pipe.dev;
 	std::lock_guard lock(dev.mutex);
 
-	if (!pipe.groups.empty()) {
+	if (pipe.groups.empty()) {
 		return;
 	}
 
