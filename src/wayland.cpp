@@ -54,6 +54,7 @@ public:
 
 	wl_display* display {};
 	wl_surface* surface {};
+	bool xdgImport {};
 
 	wl_event_queue* queue {};
 	wl_registry* registry {};
@@ -129,7 +130,7 @@ void keyboardKey(void*, wl_keyboard* keyboard, u32 serial, u32 time, u32 key, u3
 			dlg_assert(platform->window->window);
 			if (platform->window->window) {
 				// import
-				if (!platform->exportedHandle.empty()) {
+				if (platform->xdgImport && !platform->exportedHandle.empty()) {
 					auto* dpy = (swa_display_wl*)platform->window->dpy;
 					auto* win = (swa_window_wl*)platform->window->window;
 					if (dpy->xdg_importer) {
@@ -230,6 +231,7 @@ const struct wl_registry_listener registryListener = {
 WaylandPlatform::WaylandPlatform(wl_display* display, wl_surface* surface) {
 	this->display = display;
 	this->surface = surface;
+	this->xdgImport = checkEnvBinary("VIL_OVERLAY_WL_CHILD", false);
 
 	this->queue = wl_display_create_queue(display);
 	this->registry = wl_display_get_registry(display);
@@ -241,6 +243,10 @@ WaylandPlatform::WaylandPlatform(wl_display* display, wl_surface* surface) {
 	wl_display_roundtrip_queue(display, queue);
 	// make sure bound globals received all callbacks
 	wl_display_roundtrip_queue(display, queue);
+
+	// TODO: really do here already?
+	window = std::make_unique<DisplayWindow>();
+	window->dpy = swa_display_wl_create("VIL");
 }
 
 WaylandPlatform::~WaylandPlatform() {
@@ -260,10 +266,8 @@ WaylandPlatform::State WaylandPlatform::update(Gui&) {
 }
 
 void WaylandPlatform::init(Device& dev, unsigned width, unsigned height) {
-	window = std::make_unique<DisplayWindow>();
 	window->ini = dev.ini;
 	window->dev = &dev;
-	window->dpy = swa_display_wl_create("VIL");
 
 	// TODO:
 	window->presentQueue = dev.gfxQueue;
@@ -285,6 +289,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 	ini.hasSurface.store(true);
 	auto res = ini.dispatch.CreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	if(!checkEnvBinary("VIL_HOOK_OVERLAY", false)) {
+		dlg_trace(">> no hook overlay env set");
 		return res;
 	}
 
