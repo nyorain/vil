@@ -9,6 +9,7 @@
 #include <overlay.hpp>
 #include <command/record.hpp>
 #include <util/profiling.hpp>
+#include <util/chain.hpp>
 #include <vkutil/enumString.hpp>
 
 namespace vil {
@@ -375,32 +376,54 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
-		const auto supportedExts = {
+		bool visibleOverlay {};
+		if(swapchain.overlay && swapchain.overlay->platform) {
+			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
+			visibleOverlay = (state != Platform::State::hidden);
+
+			std::lock_guard lock(dev.mutex);
+			swapchain.overlay->gui->visible(visibleOverlay);
+		} else if(swapchain.overlay) {
+			std::lock_guard lock(dev.mutex);
+			visibleOverlay = swapchain.overlay->gui->visible();
+		}
+
+		// TODO: whole chain copying probably only needed when we
+		// present via overlay? Should forward exts!
+		const auto nopExts = {
 			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT,
 			VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
 			// NOTE: only works when fence is wrapped
 			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR,
 		};
-		dlg_check({
-			auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
-			while (it) {
-				if(!contains(supportedExts, it->sType)) {
-					dlg_warn("unhandled queue present pNext {}", it->sType);
+
+		ThreadMemScope tms;
+		bool chainModified = false;
+		auto chainFunc = [&](VkBaseOutStructure& ext) {
+			// ignore present regions when we have an overlay
+			if (ext.sType == VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR) {
+				if (visibleOverlay) {
+					chainModified = true;
+					return false;
 				}
-				it = it->pNext;
+
+				return true;
 			}
-		});
 
-		bool visible {};
-		if(swapchain.overlay && swapchain.overlay->platform) {
-			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
-			visible = (state != Platform::State::hidden);
+			if(!contains(nopExts, ext.sType)) {
+				dlg_warn("unhandled queue present pNext {}", ext.sType);
+			}
 
-			std::lock_guard lock(dev.mutex);
-			swapchain.overlay->gui->visible(visible);
-		} else if(swapchain.overlay) {
-			std::lock_guard lock(dev.mutex);
-			visible = swapchain.overlay->gui->visible();
+			return true;
+		};
+		auto copiedChain = copyChainLocal(tms, pPresentInfo->pNext, chainFunc);
+
+		auto npi = *pPresentInfo;
+		npi.pImageIndices = &pPresentInfo->pImageIndices[i];
+		npi.pSwapchains = &pPresentInfo->pSwapchains[i];
+		npi.swapchainCount = 1u;
+		if (chainModified) {
+			npi.pNext = copiedChain;
 		}
 
 		// update tracked frameSubmissions and timings before drawing
@@ -408,36 +431,31 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		// can already be displayed.
 		swapchainPresent(swapchain);
 
-		if(swapchain.overlay && visible) {
+		if(swapchain.overlay && visibleOverlay) {
 			span<const VkSemaphore> waitSems;
 			if(i == 0u) {
 				waitSems = {
-					pPresentInfo->pWaitSemaphores,
-					pPresentInfo->waitSemaphoreCount
+					npi.pWaitSemaphores,
+					npi.waitSemaphoreCount
 				};
 			} else {
 				dlg_warn("Having to present without wait semaphores");
 			}
 
+			// TODO: forward pNext chain!
 			res = swapchain.overlay->drawPresent(qd, waitSems,
-				pPresentInfo->pImageIndices[i]);
+				npi.pImageIndices[i]);
 		} else {
-			VkPresentInfoKHR pi {};
-			pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-			pi.pImageIndices = &pPresentInfo->pImageIndices[i];
-			pi.pSwapchains = &pPresentInfo->pSwapchains[i];
-			pi.swapchainCount = 1u;
 			if(i == 0u) {
-				pi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-				pi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
+				npi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
+				npi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
 			} else if(pPresentInfo->waitSemaphoreCount) {
 				dlg_warn("Having to present without wait semaphores");
 			}
-			pi.pNext = pPresentInfo->pNext;
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
 			ZoneScopedN("dispatch");
-			res = qd.dev->dispatch.QueuePresentKHR(queue, &pi);
+			res = qd.dev->dispatch.QueuePresentKHR(queue, &npi);
 		}
 
 		if(pPresentInfo->pResults) {
