@@ -1,8 +1,9 @@
 #pragma once
 
+#include <fwd.hpp>
 #include <vk/vulkan_core.h>
 #include <memory>
-#include <fwd.hpp>
+#include <functional>
 
 namespace vil {
 
@@ -68,18 +69,23 @@ void* findChainInfo2(void* pNext) {
 	return nullptr;
 }
 
-// IDEA: integrate unwrapping into this?
+// TODO: just optionally properly do deep copies
 
-std::unique_ptr<std::byte[]> copyChain(const void* pNext);
-inline std::unique_ptr<std::byte[]> copyChainPatch(const void*& pNext) {
+// When given, called with each copied chain element. Can freely
+// modify it. When it returns false, the chain element is omitted from
+// the copied chain.
+using ChainFunc = std::function<bool(VkBaseOutStructure&)>;
+using ChainMem = std::unique_ptr<std::byte[]>;
+
+[[nodiscard]] ChainMem copyChain(const void* pNext, const ChainFunc& = {});
+[[nodiscard]] inline ChainMem copyChainReplace(const void*& pNext, const ChainFunc& = {}) {
 	auto ret = copyChain(pNext);
 	pNext = ret.get();
 	return ret;
 }
 
-void* copyChainPatch(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
-
-void* copyChainLocal(LinAllocScope&, const void* pNext);
-void* copyChain(LinAllocator&, const void* pNext);
+void* copyChainReplace(const void*& pNext, ChainMem& buf, const ChainFunc& = {});
+void* copyChainLocal(LinAllocScope&, const void* pNext, const ChainFunc& = {});
+void* copyChain(LinAllocator&, const void* pNext, const ChainFunc& = {});
 
 } // namespace vil

@@ -377,7 +377,7 @@ VkResult doCreateDevice(
 
 	// copy the pNext chain so we can modify it.
 	std::unique_ptr<std::byte[]> copiedChain;
-	auto* pNext = copyChainPatch(nci.pNext, copiedChain);
+	auto* pNext = copyChainReplace(nci.pNext, copiedChain);
 
 	// = Queues =
 	// Make sure we get a graphics queue.

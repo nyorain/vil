@@ -30,7 +30,7 @@
  ****************************************************************************/
 
 #pragma once
-#include <vk/vulkan.h>
+#include <vulkan/vulkan.h>
 
 // These empty generic templates are specialized for each type with sType
 // members and for each sType -- providing a two way map between structure
@@ -10413,14 +10413,8 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PRO
 };
 
 // Header "base class" for pNext chain traversal
-struct LvlGenericHeader {
-   VkStructureType sType;
-   const LvlGenericHeader *pNext;
-};
-struct LvlGenericModHeader {
-   VkStructureType sType;
-   LvlGenericModHeader *pNext;
-};
+using LvlGenericHeader = VkBaseInStructure;
+using LvlGenericModHeader = VkBaseOutStructure;
 
 // Find an entry of the given type in the pNext chain
 template <typename T> const T *lvl_find_in_chain(const void *next) {
