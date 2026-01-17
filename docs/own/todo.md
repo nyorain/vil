@@ -7,6 +7,8 @@ v0.3:
 - improve README, add more gifs/pics
 
 urgent, bugs:
+- [ ] pass pNext from QueuePresent to gui/overlay
+	- [ ] might need more filtering/patching
 - [ ] when loading unrelated serialized file (cmdsel),
       updateRecords breaks as it can match only a parent but the
 	  function assumes otherwise (dlg_assert(count == 1u) in gui/cb.cpp)
