@@ -126,7 +126,9 @@ void keyboardKey(void*, wl_keyboard* keyboard, u32 serial, u32 time, u32 key, u3
 	auto& dev = *platform->dev;
 	auto& window = dev.window;
 	if (key == u32(platform->toggleKey_) && pressed) {
-		// TODO: proper sync/lock
+		// TODO: proper sync/lock?
+		// multiple threads (from multiple surfaces) might land
+		// here at the same time
 		if (!window) {
 			window = std::make_unique<DisplayWindow>();
 			window->dpy = swa_display_wl_create("VIL");
@@ -135,6 +137,10 @@ void keyboardKey(void*, wl_keyboard* keyboard, u32 serial, u32 time, u32 key, u3
 			window->dev = &dev;
 			// TODO: can't assume this
 			window->presentQueue = dev.gfxQueue;
+
+			// TODO: when opening window like this, allow to close it via same
+			// shortcut when vil window itself is focused.
+			window->allowClose = true;
 
 			dlg_assert(window->dpy);
 			if (!window->dpy) {
@@ -302,6 +308,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 	}
 
 	auto& platform = createData<WaylandSurface>(*pSurface, pCreateInfo->display, pCreateInfo->surface);
+	platform.handle = *pSurface;
 	dlg_assert(findData(*pSurface));
 	return res;
 }
