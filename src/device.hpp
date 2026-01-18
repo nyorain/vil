@@ -277,8 +277,8 @@ public:
 	Device(); // = default in src
 	~Device();
 
-	IntrusivePtr<Swapchain> swapchain();
-	IntrusivePtr<Swapchain> swapchainPtrLocked();
+	IntrusivePtr<Swapchain> lastSwapchain();
+	IntrusivePtr<Swapchain> lastSwapchainPtrLocked();
 
 	Swapchain* swapchainLocked() {
 		assertOwned(this->mutex);

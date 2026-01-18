@@ -22,7 +22,7 @@ TEST(int_gui) {
 		return;
 	}
 
-	dlg_assert(!stp.vilDev->swapchain());
+	dlg_assert(!stp.vilDev->lastSwapchain());
 
 	// create surface
 	VkHeadlessSurfaceCreateInfoEXT hsci {};
@@ -51,10 +51,10 @@ TEST(int_gui) {
 	VkSwapchainKHR swapchain;
 	VK_CHECK(stp.dispatch.CreateSwapchainKHR(stp.dev, &sci, nullptr, &swapchain));
 
-	dlg_assert(stp.vilDev->swapchain());
+	dlg_assert(stp.vilDev->lastSwapchain());
 	dlg_assert(!stp.vilDev->gui());
 
-	auto& vilSwapchain = *stp.vilDev->swapchain();
+	auto& vilSwapchain = *stp.vilDev->lastSwapchain();
 	dlg_assert(vilSwapchain.frameTimings.empty());
 	dlg_assert(!vilSwapchain.lastPresent);
 	dlg_assert(vilSwapchain.images.size() == 1u);

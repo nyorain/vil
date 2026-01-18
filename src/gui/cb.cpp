@@ -81,7 +81,7 @@ void CommandRecordGui::draw(Draw& draw) {
 	auto updateMode = selector_.updateMode();
 	IntrusivePtr<Swapchain> swapchain;
 	if(updateMode == UpdateMode::swapchain) {
-		swapchain = gui_->dev().swapchain();
+		swapchain = gui_->dev().lastSwapchain();
 		if(!swapchain) {
 			clearSelection(true);
 			return;

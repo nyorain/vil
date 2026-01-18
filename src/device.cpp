@@ -187,12 +187,12 @@ Gui& Device::getOrCreateGui(VkFormat colorFormat) {
 	return *gui_;
 }
 
-IntrusivePtr<Swapchain> Device::swapchain() {
+IntrusivePtr<Swapchain> Device::lastSwapchain() {
 	std::lock_guard lock(this->mutex);
 	return swapchain_;
 }
 
-IntrusivePtr<Swapchain> Device::swapchainPtrLocked() {
+IntrusivePtr<Swapchain> Device::lastSwapchainPtrLocked() {
 	assertOwned(this->mutex);
 	return swapchain_;
 }
