@@ -238,7 +238,8 @@ void Gui::initImGui() {
 
 	// TODO: also add gamepad support
 	// TODO: figure out how to make our custom selectables (using IsItemClicked) work
-	this->io_->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	this->io_->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard |
+		ImGuiConfigFlags_DockingEnable;
 
 	auto& io = *this->io_;
 
@@ -366,6 +367,8 @@ void Gui::initImGui() {
 	style.FramePadding = {4, 4};
 	style.ItemInnerSpacing = {4, 4};
 	style.CellPadding = {6, 1}; // we need this since we sometimes don't use lines
+	// style.DockingSeparatorSize = 1.f;
+	// style.DockingNodeHasCloseButton = false;
 
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
@@ -643,7 +646,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 				//   of handling it here?
 				VkDescriptorSet ds = dsFont_.vkHandle();
 				VkPipeline pipe = pipes_.gui;
-				auto img = (DrawGuiImage*) cmd.TextureId;
+				auto img = (DrawGuiImage*)(std::intptr_t) cmd.GetTexID();
 				if(img && img->type != ShaderImageType::count) {
 					ds = img->ds;
 					dlg_assert(img->type < ShaderImageType::count);
@@ -1064,7 +1067,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, {0.f, 0.f, 0.f, 0.f});
 
 			float w = ImGui::GetContentRegionAvail().x;
-			ImGui::PlotHistogram("", hist.data(), int(hist.size()),
+			ImGui::PlotHistogram("##frames", hist.data(), int(hist.size()),
 				0, nullptr, 0.f, FLT_MAX, {w, 100});
 
 			ImGui::PopStyleColor();
@@ -1245,6 +1248,17 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::NewFrame();
 
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, uiScale_ * ImVec2(10.f, 10.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.f, 1.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_TabBarBorderSize, 0.f);
+	ImGui::PushStyleVar(ImGuiStyleVar_TabBarOverlineSize, 0.f);
+	ImGui::PushStyleVar(ImGuiStyleVar_TabBarBorderSize, 0.f);
+	ImGui::PushStyleVar(ImGuiStyleVar_TabBorderSize, 0.f);
+	ImGui::DockSpaceOverViewport(0, nullptr,
+		ImGuiDockNodeFlags_PassthruCentralNode |
+		ImGuiDockNodeFlags_NoWindowMenuButton);
+	ImGui::PopStyleVar(6);
+
 	showDebugPopup();
 
 	if(showImguiDemo_) {
@@ -1286,7 +1300,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		dev().commandHook->freeze.store(true);
 	}
 
-	flags |= ImGuiWindowFlags_NoTitleBar;
+	// flags |= ImGuiWindowFlags_NoTitleBar;
 
 	if(mode_ == Mode::normal) {
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
@@ -1437,7 +1451,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			// ImGui::SetCursorScreenPos(ImVec2(pos.x + pad.x, barEnd.y + pad.y));
 
 			ImGui::BeginChild("selected tab", ImVec2(0, 0), false,
-				ImGuiWindowFlags_AlwaysUseWindowPadding);
+				ImGuiChildFlags_AlwaysUseWindowPadding);
 			switch(activeTab_) {
 				case Tab::overview: drawOverviewUI(draw); break;
 				case Tab::memory: drawMemoryUI(draw); break;
@@ -1453,6 +1467,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		} else {
 			dlg_error("invalid mode");
 		}
+	} else if(mode_ == Mode::normal) {
+		ImGui::PopStyleVar(3);
 	}
 
 	if(!fullscreen) {
@@ -2524,9 +2540,6 @@ bool inlineButton(const char* label, const ImVec2& size_arg = ImVec2(0, 0), ImGu
 	if (!ImGui::ItemAdd(bb, id))
 		return false;
 
-	if (g.LastItemData.InFlags & ImGuiItemFlags_ButtonRepeat)
-		flags |= ImGuiButtonFlags_Repeat;
-
 	bool hovered, held;
 	bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, flags);
 
@@ -2693,7 +2706,7 @@ std::vector<unsigned> initImguiKeymap() {
 ImGuiKey keyToImGui(unsigned key) {
 	static auto map = initImguiKeymap();
 	dlg_assert_or(key < map.size(), return ImGuiKey_None);
-	return map[key];
+	return ImGuiKey(map[key]);
 }
 
 ImageViewer& Gui::standaloneImageViewer() {

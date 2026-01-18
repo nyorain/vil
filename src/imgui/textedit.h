@@ -31,16 +31,9 @@
 #include <unordered_map>
 #include <map>
 #include <optional>
+#include <cstdint>
 #include <regex>
 #include "imgui.h"
-
-namespace srell {
-
-template <class charT> struct regex_traits;
-template <class charT, class traits> class basic_regex;
-typedef basic_regex<char, regex_traits<char>> regex;
-
-}
 
 namespace igt {
 

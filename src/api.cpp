@@ -134,16 +134,16 @@ extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum V
 	ImGuiKey key {};
 	switch(mod) {
 		case VilKeyModAlt:
-			key = ImGuiKey_ModAlt;
+			key = ImGuiMod_Alt;
 			break;
 		case VilKeyModCtrl:
-			key = ImGuiKey_ModCtrl;
+			key = ImGuiMod_Ctrl;
 			break;
 		case VilKeyModSuper:
-			key = ImGuiKey_ModSuper;
+			key = ImGuiMod_Super;
 			break;
 		case VilKeyModShift:
-			key = ImGuiKey_ModShift;
+			key = ImGuiMod_Shift;
 			break;
 		default:
 			break;

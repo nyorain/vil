@@ -303,7 +303,8 @@ void ImageViewer::drawHistogram(Draw& draw) {
 
 	auto& io = ImGui::GetIO();
 	ImGui::InvisibleButton("HistCanvas", {histogram_.size.x, histogram_.size.y});
-	ImGui::SetItemUsingMouseWheel();
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
 	if(ImGui::IsItemFocused()) {
 		if(histogram_.panning) {
 			histogram_.fixedRange = true;
@@ -536,7 +537,7 @@ void ImageViewer::drawImageArea(Draw& draw) {
 	auto endX = bgW / float(regW);
 	auto endY = bgH / float(regH);
 	auto uv1 = ImVec2((endX - offset_.x) / scale_, (endY - offset_.y) / scale_);
-	ImGui::Image((void*) &imageDraw_, {bgW, bgH}, uv0, uv1);
+	ImGui::Image((ImTextureID)(std::intptr_t) &imageDraw_, {bgW, bgH}, uv0, uv1);
 	ImGui::PopClipRect();
 
 	// make sure the view & descriptor we used for drawing stay alive until the
@@ -549,7 +550,8 @@ void ImageViewer::drawImageArea(Draw& draw) {
 	auto& io = ImGui::GetIO();
 	ImGui::SetCursorScreenPos(pos);
 	ImGui::InvisibleButton("ImageCanvas", {bgW, bgH});
-	ImGui::SetItemUsingMouseWheel();
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
 	if(ImGui::IsItemFocused()) {
 		// panning
 		if(panning_) {
