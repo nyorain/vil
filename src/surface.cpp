@@ -1,4 +1,4 @@
-#include <platform.hpp>
+#include <surface.hpp>
 #include <layer.hpp>
 #include <data.hpp>
 #include <vil_api.h>
@@ -9,7 +9,7 @@
 
 namespace vil {
 
-Platform::Platform() {
+void readOverlayKeys(int& toggleKey_, int& focusKey_) {
 	auto toggleKeyString = std::getenv("VIL_TOGGLE_KEY");
 	if(toggleKeyString) {
 		toggleKey_ = (enum VilKey) swa_key_from_name(toggleKeyString);
@@ -33,6 +33,10 @@ Platform::Platform() {
 	}
 }
 
+OverlaySurface::OverlaySurface() {
+	readOverlayKeys(toggleKey_, focusKey_);
+}
+
 // api
 VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		VkInstance                                  instance,
@@ -42,7 +46,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		return;
 	}
 
-	auto platform = moveDataOpt<Platform>(surface); // destroy it
+	auto platform = moveDataOpt<Surface>(surface); // destroy it
+	dlg_assert(platform->handle == surface);
+	platform->handle = {};
+
 	auto& ini = getData<Instance>(instance);
 	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
 }

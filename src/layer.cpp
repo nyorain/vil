@@ -12,7 +12,7 @@
 #include <pipe.hpp>
 #include <shader.hpp>
 #include <ds.hpp>
-#include <platform.hpp>
+#include <surface.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>

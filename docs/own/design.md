@@ -1300,3 +1300,27 @@ check has to be done.
 We could probably extend this to even simpler handling for single-use
 records.
 
+# Multiple swapchains
+
+We currently just support a single gui (per device). Everything else is
+overkill and we probably don't want that.
+When we create a window:
+- it should be possible to select the swapchain you see the commands/
+  timings from. In UI overview already?
+
+When the application creates an overlay:
+- the api allows just for a single overlay, creating a second one fails
+- you can still select the swapchain you want to see the commands/etc from
+
+When VIL_HOOK_OVERLAY is set things get complicated. How to decide which
+swapchain gets the overlay? Maybe don't create the overlay already on swapchain
+creation. Only create it once we know we want the overlay on this swapchain, i.e.
+as soon as it should be shown?
+The Surface implementation that really only acts as input grabber.
+It gets informed as soon as the overlay is created/destroyed?
+When one surface already has an overlay and it is opened on another
+window, we remove the one from the first surface and show it on the second?
+Would need really careful synchronization, swapchain-creation, queue-present
+and hooked input handling can happen in different threads.
+
+Where does the overlay live? Member of dev? Probably the easiest.

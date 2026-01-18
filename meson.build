@@ -191,7 +191,7 @@ src = files(
 	'src/data.cpp',
 	'src/api.cpp',
 	'src/overlay.cpp',
-	'src/platform.cpp',
+	'src/surface.cpp',
 	'src/lmm.cpp',
 	'src/fault.cpp',
 	'src/util/util.cpp',
@@ -278,7 +278,7 @@ src = files(
 	'src/ds.hpp',
 	'src/overlay.hpp',
 	'src/queue.hpp',
-	'src/platform.hpp',
+	'src/surface.hpp',
 	'src/win32.hpp',
 	'src/data.hpp',
 	'src/queryPool.hpp',
@@ -407,10 +407,10 @@ if with_window or with_x11_hook or with_win32 or with_example
 		deps += dep_swa
 		src += files(
 			'src/window.cpp',
-			'src/swaPlatform.cpp',
+			'src/swaOverlay.cpp',
 
 			'src/window.hpp',
-			'src/swaPlatform.hpp',
+			'src/swaOverlay.hpp',
 		)
 
 		layer_args += '-DVIL_WITH_SWA=1'

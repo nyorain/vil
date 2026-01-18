@@ -523,7 +523,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	*pPipelineLayout = castDispatch<VkPipelineLayout>(pl);
 	dev.pipeLayouts.mustEmplace(*pPipelineLayout, std::move(plPtr));
 
-	dlg_trace(">> res: {}", res);
 	return res;
 }
 

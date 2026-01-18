@@ -1,7 +1,7 @@
 #pragma once
 
 #include <swa/key.h>
-#include <platform.hpp>
+#include <surface.hpp>
 
 struct swa_display;
 struct swa_window;
@@ -12,7 +12,7 @@ namespace vil {
 // given platform. Just needs platform-specific mechanisms for checking
 // on the original window.
 // Thin wrapper around the Platform interface, connecting swa to ImGui input.
-struct SwaPlatform : Platform {
+struct SwaOverlaySurface : OverlaySurface {
 	swa_display* dpy {};
 	swa_window* window {};
 
@@ -27,8 +27,8 @@ struct SwaPlatform : Platform {
 	bool doGuiUnfocus {};
 
 	virtual void activateWindow(bool doActivate);
-	void resize(unsigned width, unsigned height) override;
-	State update(Gui& gui) override;
+	bool needsRendering(Swapchain& swapchain) override;
+	void swapchainCreated(Swapchain& swapchain) override;
 
 	// Derived platforms must first initialize the display (using the
 	// specific, matching swa backend), then call this for window
@@ -38,6 +38,7 @@ struct SwaPlatform : Platform {
 	// Must return whether the given key is currently pressed on the
 	// original window.
 	virtual bool pressed(u32 key) const = 0;
+	virtual void onEvent() {};
 };
 
 } // namespace vil

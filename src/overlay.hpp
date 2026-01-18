@@ -12,8 +12,7 @@ struct Overlay {
 	Swapchain* swapchain {};
 	std::vector<RenderBuffer> buffers;
 	Gui* gui {}; // not null after init
-
-	Platform* platform {};
+	bool hooked {}; // whether created via VIL_HOOK_OVERLAY
 
 	void init(Swapchain& swapchain);
 	void initRenderBuffers(); // called from init
@@ -37,5 +36,7 @@ private:
 	VkImageView depthView_ {};
 	VkDeviceMemory depthMemory_ {};
 };
+
+void activateOverlay(Swapchain& swapchain, bool hooked);
 
 } // namespace vil

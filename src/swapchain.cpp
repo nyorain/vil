@@ -5,7 +5,7 @@
 #include <image.hpp>
 #include <sync.hpp>
 #include <queue.hpp>
-#include <platform.hpp>
+#include <surface.hpp>
 #include <overlay.hpp>
 #include <command/record.hpp>
 #include <util/profiling.hpp>
@@ -15,13 +15,22 @@
 namespace vil {
 
 Swapchain::~Swapchain() {
-	overlay.reset();
 	destroy();
 }
 
 void Swapchain::destroy() {
 	if(!dev) {
 		return;
+	}
+
+	{
+		std::lock_guard lock(dev->mutex);
+		if (overlay) {
+			dlg_assert(dev->overlay.get() == overlay);
+			dev->overlay.reset();
+		}
+
+		surface = nullptr;
 	}
 
 	for(auto* img : this->images) {
@@ -39,9 +48,6 @@ void Swapchain::destroy() {
 			memBind.memState = FullMemoryBind::State::resourceDestroyed;
 		}
 
-		// TODO: call onApiDestroy? shouldn't be needed atm but might
-		// be in future. Not sure if expected, the api object
-		// was always of implicit nature.
 		dev->images.mustErase(handle);
 	}
 
@@ -58,7 +64,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& dev = getDevice(device);
-	auto* platform = findData<Platform>(pCreateInfo->surface);
+	// might be null on backends without hook impl
+	auto* surface = findData<Surface>(pCreateInfo->surface);
 
 	// It's important we *first* destroy our image objects coming
 	// from this swapchain since they may implicitly destroyed
@@ -67,8 +74,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	// be destroyed via vulkan spec and the old swapchain becomes
 	// unusable.
 	Swapchain* oldChain {};
-	std::unique_ptr<Overlay> savedOverlay {};
-	bool recreateOverlay {false};
+	Overlay* transferOverlay {};
 	if(pCreateInfo->oldSwapchain) {
 		// NOTE: valid per spec to pass in swapchains created by
 		// ANOTHER device. Don't handle this case rn but need to ignore
@@ -77,21 +83,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		oldChain = dev.swapchains.find(pCreateInfo->oldSwapchain);
 
 		if(oldChain) {
+			{
+				std::lock_guard lock(dev.mutex);
+				dlg_assert(oldChain->surface == surface);
+				transferOverlay = oldChain->overlay;
+				oldChain->overlay = nullptr;
+				oldChain->surface = nullptr;
+			}
+
 			// This is important to destroy our handles of the swapchain
 			// images.
 			oldChain->destroy();
-
-			if(oldChain->overlay) {
-				if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
-					// Have to make sure previous rendering has finished.
-					// We can be sure gui isn't starting new draws in another
-					// thread.
-					oldChain->overlay->gui->waitForDraws();
-					savedOverlay = std::move(oldChain->overlay);
-				} else {
-					recreateOverlay = true;
-				}
-			}
 		}
 	}
 
@@ -130,6 +132,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.dev = &dev;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
+	swapd.surface = surface;
 	swapd.supportsSampling = (sci.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT);
 
 	// use data from old swapchain
@@ -185,34 +188,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		dev.images.mustEmplace(handleDown, std::move(imgPtr));
 	}
 
-	dlg_trace(">> Createswapchain. platform: {}, dev.gui {}", platform, dev.gui());
+	if (transferOverlay) {
+		transferOverlay->init(swapd);
 
-	if(savedOverlay) {
-		dlg_trace(">>savedOverlay");
+		std::lock_guard lock(dev.mutex);
+		swapd.overlay = transferOverlay;
+	}
 
-		swapd.overlay = std::move(savedOverlay);
-		swapd.overlay->swapchain = &swapd;
-
-		{
-			std::lock_guard lock(dev.mutex);
-			swapd.overlay->initRenderBuffers();
-		}
-
-		if(swapd.overlay->platform) {
-			swapd.overlay->platform->resize(swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
-		}
-	} else if(recreateOverlay) {
-		// Otherwise we have to create a new renderer from scratch.
-		// Carry over all gui logic. Just recreate rendering logic
-		dlg_error("TODO: not implemented");
-	} else if(platform) {
-		dlg_trace(">> creating overlay");
-
-		swapd.overlay = std::make_unique<Overlay>();
-		swapd.overlay->init(swapd);
-
-		swapd.overlay->platform = platform;
-		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
+	if (surface) {
+		surface->swapchainCreated(swapd);
 	}
 
 	dev.swapchain(IntrusivePtr<Swapchain>(&swapd));
@@ -230,6 +214,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 	auto swapchainPtr = mustMoveUnset(device, swapchain);
 	auto& dev = *swapchainPtr->dev;
 	dev.swapchainDestroyed(*swapchainPtr);
+
+	if (swapchainPtr->surface) {
+		swapchainPtr->surface->swapchainDestroyed(*swapchainPtr);
+	}
 	swapchainPtr->destroy();
 
 	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
@@ -377,15 +365,46 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkResult res;
 
 		bool visibleOverlay {};
-		if(swapchain.overlay && swapchain.overlay->platform) {
-			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
-			visibleOverlay = (state != Platform::State::hidden);
 
-			std::lock_guard lock(dev.mutex);
-			swapchain.overlay->gui->visible(visibleOverlay);
-		} else if(swapchain.overlay) {
-			std::lock_guard lock(dev.mutex);
-			visibleOverlay = swapchain.overlay->gui->visible();
+		{
+			std::unique_lock lock(dev.mutex);
+			if (swapchain.overlay && !swapchain.overlay->hooked) {
+				visibleOverlay = swapchain.overlay->gui->visible();
+			} else if (swapchain.surface) {
+				auto* osurf = dynamic_cast<OverlaySurface*>(swapchain.surface);
+				if (osurf) {
+					visibleOverlay = osurf->needsRendering(swapchain);
+					// swapchain.overlay->gui->visible(visibleOverlay);
+
+					if (swapchain.overlay && !visibleOverlay) {
+						// keep dev.overlay alive for now, cached
+						swapchain.overlay->swapchain = nullptr;
+						swapchain.overlay = nullptr;
+					} else if (!swapchain.overlay && visibleOverlay) {
+						if (dev.overlay) {
+							if (dev.overlay->swapchain) {
+								dlg_assert(dev.overlay->swapchain->overlay == dev.overlay.get());
+								dev.overlay->swapchain->overlay = nullptr;
+							}
+
+							dev.overlay->swapchain = &swapchain;
+							dev.overlay->hooked = true;
+							swapchain.overlay = dev.overlay.get();
+
+							lock.unlock();
+							dev.overlay->init(swapchain);
+						}
+					}
+				}
+			}
+		}
+
+		if (!swapchain.overlay && visibleOverlay) {
+			activateOverlay(swapchain, true);
+			if (swapchain.overlay) {
+				dlg_assert(swapchain.overlay->gui);
+				swapchain.overlay->gui->visible(true);
+			}
 		}
 
 		// TODO: whole chain copying probably only needed when we
@@ -444,7 +463,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 
 			// TODO: forward pNext chain!
 			res = swapchain.overlay->drawPresent(qd, waitSems,
-				npi.pImageIndices[i]);
+				pPresentInfo->pImageIndices[i]);
 		} else {
 			if(i == 0u) {
 				npi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
