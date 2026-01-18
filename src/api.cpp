@@ -47,30 +47,17 @@ extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevic
 		return {};
 	}
 
-	auto& sc = *swapchain;
-	if(sc.overlay) {
-		dlg_warn("Swapchain already had an overlay");
-		return {};
+	{
+		std::lock_guard lock(dev.mutex);
+		if (dev.overlay && !dev.overlay->hooked) {
+			dlg_warn("Only one explicit overlay supported");
+			return {};
+		}
 	}
 
-	// TODO: if this gui object was created by implicitly created
-	// window/overlay, we want to keep the gui but create the new overlay
-	// after destroying the implicit window/overlay.
-	if(dev.gui()) {
-		dlg_warn("There already is a vil gui; Can't have two of them");
-		return {};
-	}
-
-	sc.overlay = std::make_unique<vil::Overlay>();
-	sc.overlay->init(sc);
-	ret = reinterpret_cast<VilOverlay>(sc.overlay.get());
-
-	// When the application creates an overlay, we can close the window
-#ifdef VIL_WITH_SWA
-	if(dev.window) {
-		dev.window.reset();
-	}
-#endif // VIL_WITH_SWA
+	activateOverlay(*swapchain, false);
+	dlg_assert(swapchain->overlay);
+	ret = reinterpret_cast<VilOverlay>(swapchain->overlay);
 
 	return ret;
 }

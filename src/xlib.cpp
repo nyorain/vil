@@ -1,10 +1,11 @@
 #include <xlib.hpp>
 #include <layer.hpp>
+#include <swapchain.hpp>
 #include <util/util.hpp>
 #include <swa/swa.h>
 #include <gui/gui.hpp>
 #include <overlay.hpp>
-#include <swaPlatform.hpp>
+#include <swaOverlay.hpp>
 #include <swa/x11.h>
 
 #include <X11/keysym.h>
@@ -14,7 +15,7 @@
 
 namespace vil {
 
-struct X11Platform : SwaPlatform {
+struct X11Surface : SwaOverlaySurface {
 	u32 surfaceWindow {};
 	xcb_connection_t* connection;
 	xcb_key_symbols_t* symbols;
@@ -22,31 +23,37 @@ struct X11Platform : SwaPlatform {
 	bool grabbingKeyboard {};
 	bool grabbingPointer {};
 
-	~X11Platform();
-	void init(Device& dev, unsigned width, unsigned height) override;
+	~X11Surface();
+	void swapchainCreated(Swapchain& swapchain) override;
 	bool pressed(u32 key) const override;
-	State update(Gui& gui) override;
+	bool needsRendering(Swapchain& swapchain) override;
 	void activateWindow(bool doActivate) override;
 	void onEvent() override;
 };
 
-X11Platform::~X11Platform() {
+X11Surface::~X11Surface() {
 	dlg_trace("~X11Platform");
 	activateWindow(false);
 }
 
-void X11Platform::init(Device& dev, unsigned width, unsigned height) {
-	// init display
-	dpy = swa_display_x11_create("VIL");
-	dlg_assert(dpy);
+void X11Surface::swapchainCreated(Swapchain& swapchain) {
+	if (!dpy) {
+		// init display
+		dpy = swa_display_x11_create("VIL");
+		dlg_assert(dpy);
 
-	this->connection = swa_display_x11_connection(dpy);
-	this->symbols = xcb_key_symbols_alloc(this->connection);
+		this->connection = swa_display_x11_connection(dpy);
+		this->symbols = xcb_key_symbols_alloc(this->connection);
 
-	initWindow(dev, (void*)(uintptr_t) this->surfaceWindow, width, height);
+		auto [width, height] = swapchain.ci.imageExtent;
+		initWindow(*swapchain.dev, (void*)(uintptr_t) this->surfaceWindow,
+			width, height);
+	}
+
+	SwaOverlaySurface::swapchainCreated(swapchain);
 }
 
-bool X11Platform::pressed(u32 key) const {
+bool X11Surface::pressed(u32 key) const {
 	auto keycode = [&]{
 		switch(key) {
 			case swa_key_equals: return XK_equal;
@@ -74,7 +81,7 @@ bool X11Platform::pressed(u32 key) const {
 	return pressed;
 }
 
-Platform::State X11Platform::update(Gui& gui) {
+bool X11Surface::needsRendering(Swapchain& swapchain) {
 	if(status == State::focused) {
 		// re-activate force grab
 		xcb_ungrab_pointer(this->origConnection, XCB_TIME_CURRENT_TIME);
@@ -105,10 +112,10 @@ Platform::State X11Platform::update(Gui& gui) {
 		}
 	}
 
-	return SwaPlatform::update(gui);
+	return SwaOverlaySurface::needsRendering(swapchain);
 }
 
-void X11Platform::activateWindow(bool doActivate) {
+void X11Surface::activateWindow(bool doActivate) {
 	if(!doActivate) {
 		// end our grab
 		if(grabbingPointer) {
@@ -124,10 +131,10 @@ void X11Platform::activateWindow(bool doActivate) {
 		xcb_flush(this->connection);
 	}
 
-	SwaPlatform::activateWindow(doActivate);
+	SwaOverlaySurface::activateWindow(doActivate);
 }
 
-void X11Platform::onEvent() {
+void X11Surface::onEvent() {
 	auto* ev = static_cast<const xcb_generic_event_t*>(swa_display_x11_current_event(this->dpy));
 	if(ev && status == State::shown) {
 		unsigned type = ev->response_type & ~0x80;
@@ -193,7 +200,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
 		return res;
 	}
 
-	auto& platform = createData<X11Platform>(*pSurface);
+	auto& platform = createData<X11Surface>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->window;
 	platform.origConnection = XGetXCBConnection(pCreateInfo->dpy);
 
@@ -216,7 +223,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 		return res;
 	}
 
-	auto& platform = createData<X11Platform>(*pSurface);
+	auto& platform = createData<X11Surface>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->window;
 	platform.origConnection = pCreateInfo->connection;
 

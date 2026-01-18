@@ -146,8 +146,11 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 }
 
 void Gui::destroyRenderStuff() {
-	auto vkDev = dev_->handle;
+	for(auto& draw : draws_) {
+		dlg_assert (!draw->inUse);
+	}
 
+	auto vkDev = dev_->handle;
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
@@ -2409,6 +2412,7 @@ void Gui::updateColorFormat(VkFormat newColorFormat) {
 		return;
 	}
 
+	waitForDraws();
 	colorFormat_ = newColorFormat;
 	initRenderStuff();
 }

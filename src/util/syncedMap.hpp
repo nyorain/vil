@@ -131,13 +131,13 @@ public:
 
 	P<T> mustMove(const K& key) {
 		auto ret = move(key);
-		assert(ret);
+		dlg_assert(ret);
 		return ret;
 	}
 
 	P<T> mustMoveLocked(const K& key) {
 		auto ret = moveLocked(key);
-		assert(ret);
+		dlg_assert(ret);
 		return ret;
 	}
 
@@ -176,7 +176,7 @@ public:
 		assertOwnedOrShared(*mutex);
 
 		auto it = inner.find(key);
-		assert(it != inner.end());
+		dlg_assert(it != inner.end());
 		return *it->second;
 	}
 
@@ -205,7 +205,7 @@ public:
 	template<class... Args>
 	P<T>& mustEmplace(Args&&... args) {
 		auto [ptr, success] = this->emplace(std::forward<Args>(args)...);
-		assert(success);
+		dlg_assert(success);
 		return *ptr;
 	}
 
@@ -240,7 +240,7 @@ public:
 		static_assert(std::is_copy_constructible_v<P<T>>);
 		std::shared_lock lock(*mutex);
 		auto it = inner.find(key);
-		assert(it != inner.end());
+		dlg_assert(it != inner.end());
 		return it->second;
 	}
 
@@ -298,13 +298,13 @@ public:
 
 	P<T> mustMove(const_reference key) {
 		auto ret = move(key);
-		assert(ret);
+		dlg_assert(ret);
 		return ret;
 	}
 
 	P<T> mustMoveLocked(const_reference key) {
 		auto ret = moveLocked(key);
-		assert(ret);
+		dlg_assert(ret);
 		return ret;
 	}
 
@@ -330,7 +330,7 @@ public:
 		auto it = inner.find(dummy);
 		(void) dummy.release();
 
-		assert(it != inner.end());
+		dlg_assert(it != inner.end());
 		return *it;
 	}
 
@@ -347,7 +347,7 @@ public:
 	template<class... Args>
 	T& mustEmplace(Args&&... args) {
 		auto [ptr, success] = this->emplace(std::forward<Args>(args)...);
-		assert(success);
+		dlg_assert(success);
 		return *ptr;
 	}
 
@@ -375,7 +375,7 @@ public:
 		static_assert(std::is_copy_constructible_v<P<T>>);
 		std::shared_lock lock(*mutex);
 		auto it = inner.find(key);
-		assert(it != inner.end());
+		dlg_assert(it != inner.end());
 		return *it;
 	}
 
