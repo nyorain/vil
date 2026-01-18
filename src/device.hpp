@@ -156,6 +156,7 @@ struct Device {
 	VkSampler nearestSampler {};
 
 	std::unique_ptr<DisplayWindow> window;
+	std::unique_ptr<Overlay> overlay {};
 
 	// Always valid, initialized on device creation.
 	std::unique_ptr<CommandHook> commandHook {};

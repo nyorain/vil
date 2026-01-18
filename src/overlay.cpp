@@ -1,10 +1,11 @@
 #include <overlay.hpp>
 #include <swapchain.hpp>
 #include <image.hpp>
+#include <window.hpp>
 #include <cb.hpp>
 #include <queue.hpp>
 #include <sync.hpp>
-#include <platform.hpp>
+#include <surface.hpp>
 #include <imgui/imgui.h>
 #include <util/dlg.hpp>
 #include <util/util.hpp>
@@ -15,13 +16,21 @@ namespace vil {
 Overlay::Overlay() = default;
 
 Overlay::~Overlay() {
+	if (gui) {
+		gui->waitForDraws();
+	}
+
 	buffers.clear();
 	destroyDepth();
 }
 
-void Overlay::init(Swapchain& swapchain) {
-	this->swapchain = &swapchain;
-	this->gui = &swapchain.dev->getOrCreateGui(swapchain.ci.imageFormat);
+void Overlay::init(Swapchain& newSwapchain) {
+	if (!this->swapchain || !compatible(swapchain->ci, newSwapchain.ci)) {
+		// potentially have to recreate gui pipes for a new format
+		this->gui = &newSwapchain.dev->getOrCreateGui(newSwapchain.ci.imageFormat);
+	}
+
+	this->swapchain = &newSwapchain;
 	initRenderBuffers();
 }
 
@@ -113,6 +122,38 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 bool Overlay::compatible(const VkSwapchainCreateInfoKHR& a,
 		const VkSwapchainCreateInfoKHR& b) {
 	return a.imageFormat == b.imageFormat;
+}
+
+void activateOverlay(Swapchain& swapchain, bool hooked) {
+	auto& dev = *swapchain.dev;
+	assertNotOwned(dev.mutex);
+
+	if (dev.window)  {
+		dlg_assert(!dev.overlay);
+		dev.window.reset();
+	}
+
+	std::unique_lock lock(dev.mutex);
+	if (dev.overlay) { // remove from previous swapchain
+		if (!dev.overlay->hooked) {
+			return;
+		}
+
+		dlg_assert(dev.overlay->swapchain);
+		if (dev.overlay->swapchain) {
+			dev.overlay->swapchain->overlay = nullptr;
+		}
+	} else {
+		dev.overlay = std::make_unique<Overlay>();
+	}
+
+	swapchain.overlay = dev.overlay.get();
+	dev.overlay->hooked = hooked;
+
+	if (dev.overlay->swapchain != &swapchain) {
+		lock.unlock();
+		dev.overlay->init(swapchain);
+	}
 }
 
 } // namespace vil
