@@ -224,6 +224,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 	}
 
 	auto& platform = createData<X11Surface>(*pSurface);
+	platform.handle = *pSurface;
 	platform.surfaceWindow = pCreateInfo->window;
 	platform.origConnection = pCreateInfo->connection;
 

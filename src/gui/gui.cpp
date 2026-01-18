@@ -1003,7 +1003,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	// swapchain stuff
-	auto swapchain = dev.swapchain();
+	auto swapchain = dev.lastSwapchain();
 
 	if(swapchain) {
 		if(ImGui::Button("View per-frame submissions")) {
@@ -1572,7 +1572,7 @@ void Gui::activateTab(Tab tab) {
 		// when we first swtich to the command tab, select the swapchain
 		// by default (if there is any)
 		assertNotOwned(dev_->mutex);
-		if(auto sc = dev_->swapchain(); sc) {
+		if(auto sc = dev_->lastSwapchain(); sc) {
 			tabs_.cb->showSwapchainSubmissions(*sc, true);
 		}
 	}

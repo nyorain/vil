@@ -41,7 +41,7 @@ extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevic
 	auto& dev = getDeviceByLoader(vkDevice);
 
 	VilOverlay ret {};
-	auto swapchain = dev.swapchain();
+	auto swapchain = dev.lastSwapchain();
 	if(!swapchain) {
 		dlg_warn("No last created swapchain (was the last created swapchain destroyed?)");
 		return {};
