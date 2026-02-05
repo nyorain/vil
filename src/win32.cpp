@@ -1,10 +1,12 @@
 #include <win32.hpp>
-#include <swaPlatform.hpp>
+#include <swaOverlay.hpp>
 #include <gui/gui.hpp>
 #include <vk/vulkan.h>
 #include <device.hpp>
+#include <swapchain.hpp>
 #include <layer.hpp>
-#include <platform.hpp>
+#include <overlay.hpp>
+#include <surface.hpp>
 #include <util/util.hpp>
 #include <vil_api.h>
 #include <swa/key.h>
@@ -128,7 +130,7 @@ public:
 
 std::weak_ptr<InputHooks> InputHooks::instance_;
 
-struct Win32Platform : Platform {
+struct Win32Surface : OverlaySurface {
 	HWND surfaceWindow {};
 
 	HHOOK msgHook {};
@@ -139,10 +141,10 @@ struct Win32Platform : Platform {
 	bool focusPressed {}; // for focus key
 
 	std::thread thread;
-	mutable std::mutex mutex;
-	mutable std::condition_variable cv;
-	mutable std::atomic<i64> doStuff;
-	mutable Gui* gui;
+	std::mutex mutex;
+	std::condition_variable cv;
+	std::atomic<i64> doStuff;
+	Gui* gui;
 	std::atomic<bool> ret;
 
 	int lastX {};
@@ -157,11 +159,10 @@ struct Win32Platform : Platform {
 
 	std::shared_ptr<InputHooks> hooks;
 
-	~Win32Platform();
+	~Win32Surface();
 
-	void init(Device& dev, unsigned width, unsigned height) override;
-	void resize(unsigned, unsigned) override {}
-	State update(Gui& gui) override;
+	void swapchainCreated(Swapchain&) override;
+	bool needsRendering(Swapchain& swapchain) override;
 
 	bool checkPressed(u32 key) const;
 	void uiThread(Device& dev, u32 width, u32 height);
@@ -170,17 +171,17 @@ struct Win32Platform : Platform {
 	bool hookInput() const { return state == State::focused; }
 
 public:
-	static Win32Platform* instance_;
+	static Win32Surface* instance_;
 
-	static Win32Platform& get() {
+	static Win32Surface& get() {
 		dlg_assert(instance_);
 		return *instance_;
 	}
 };
 
-Win32Platform* Win32Platform::instance_ = nullptr;
+Win32Surface* Win32Surface::instance_ = nullptr;
 
-Win32Platform::~Win32Platform() {
+Win32Surface::~Win32Surface() {
 	if(msgHook && wndProcHook) {
 		UnhookWindowsHookEx(msgHook);
 		UnhookWindowsHookEx(wndProcHook);
@@ -195,7 +196,7 @@ Win32Platform::~Win32Platform() {
 	}
 }
 
-bool Win32Platform::checkPressed(u32 key) const {
+bool Win32Surface::checkPressed(u32 key) const {
 	auto keycode = swa_key_to_winapi(swa_key(key));
 	return hooks->GetAsyncKeyState.forward(keycode) < 0;
 }
@@ -216,7 +217,7 @@ constexpr auto windowClassName = "VIL";
 	LocalFree(buffer); \
 } while(0)
 
-void handleKey(Win32Platform* platform, bool pressed,
+void handleKey(Win32Surface* platform, bool pressed,
 		WPARAM wparam, LPARAM lparam) {
 	(void) lparam;
 	auto keycode = swa_winapi_to_key((unsigned)(wparam));
@@ -238,15 +239,15 @@ bool cursorShown() {
 LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 	MSG* msg = (MSG*) lParam;
 
-	dlg_assert_or(Win32Platform::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
-	auto& wp = Win32Platform::get();
+	dlg_assert_or(Win32Surface::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
+	auto& wp = Win32Surface::get();
 
-	if (wp.state == Win32Platform::State::hidden || wp.moveResizing || nCode < 0) {
+	if (wp.state == Win32Surface::State::hidden || wp.moveResizing || nCode < 0 || !wp.gui) {
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
-	bool forward = wp.state == SwaPlatform::State::shown;
-	bool handle = wp.state == SwaPlatform::State::focused;
+	bool forward = wp.state == Win32Surface::State::shown;
+	bool handle = wp.state == Win32Surface::State::focused;
 
 	auto doHitTest = [&](u32 x, u32 y) {
 		POINT p {LONG(x), LONG(y)};
@@ -254,7 +255,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		dlg_assert(r);
 
 		i32 l = (u32(p.y) << 16) | (u32(p.x) & 0xFFFFu);
-		auto res = SendMessage(Win32Platform::get().surfaceWindow, WM_NCHITTEST, 0, l);
+		auto res = SendMessage(Win32Surface::get().surfaceWindow, WM_NCHITTEST, 0, l);
 		// dlg_trace("doHitTest: {}", res == HTCLIENT);
 		return res == HTCLIENT;
 	};
@@ -272,15 +273,15 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				y > wp.guiWinPos.y &&
 				x < wp.guiWinPos.x + wp.guiWinSize.x &&
 				y < wp.guiWinPos.y + wp.guiWinSize.y;
-		if(wp.state == SwaPlatform::State::focused && !inside) {
+		if(wp.state == Win32Surface::State::focused && !inside) {
 			dlg_trace("state: shown (unfocsed)");
-			wp.state = SwaPlatform::State::shown;
+			wp.state = Win32Surface::State::shown;
 			handle = false;
 			forward = true;
 			wp.doGuiUnfocus = true;
-		} else if(wp.state == SwaPlatform::State::shown && inside) {
+		} else if(wp.state == Win32Surface::State::shown && inside) {
 			dlg_trace("state: focused");
-			wp.state = SwaPlatform::State::focused;
+			wp.state = Win32Surface::State::focused;
 			handle = true;
 			forward = false;
 		}
@@ -488,10 +489,10 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 LRESULT wndProcHookFunc(_In_ int nCode, _In_ WPARAM wParam, _In_ LPARAM lParam)
 {
-	dlg_assert_or(Win32Platform::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
-	auto& wp = Win32Platform::get();
+	dlg_assert_or(Win32Surface::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
+	auto& wp = Win32Surface::get();
 
-	if (wp.state != Win32Platform::State::focused || nCode < 0) {
+	if (wp.state != Win32Surface::State::focused || nCode < 0) {
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
@@ -527,7 +528,7 @@ LRESULT wndProcHookFunc(_In_ int nCode, _In_ WPARAM wParam, _In_ LPARAM lParam)
 	return CallNextHookEx(nullptr, nCode, wParam, lParam);
 }
 
-bool Win32Platform::doUpdate() {
+bool Win32Surface::doUpdate() {
 	// update overlay window position
 	if(state != State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey_))) {
@@ -535,12 +536,15 @@ bool Win32Platform::doUpdate() {
 
 			state = State::focused;
 
-			Win32Platform::instance_ = this;
+			Win32Surface::instance_ = this;
 			hooks->save();
 
 			POINT point;
 			hooks->GetCursorPos.forward(&point);
-			gui->addMousePosEvent({float(point.x), float(point.y)});
+
+			if (gui) {
+				gui->addMousePosEvent({float(point.x), float(point.y)});
+			}
 		}
 	}
 
@@ -570,7 +574,7 @@ bool Win32Platform::doUpdate() {
 		// check if cursor is shown. If not, we draw our own.
 	}
 
-	if(state != State::hidden) {
+	if(state != State::hidden && gui) {
 		gui->imguiIO().MouseDrawCursor = softwareCursor;
 
 		// TODO: error handling
@@ -592,7 +596,7 @@ bool Win32Platform::doUpdate() {
 	return state != State::hidden;
 }
 
-void Win32Platform::uiThread(Device& dev, u32, u32) {
+void Win32Surface::uiThread(Device& dev, u32, u32) {
 	std::unique_lock lock(mutex);
 	(void) dev;
 
@@ -632,12 +636,18 @@ void Win32Platform::uiThread(Device& dev, u32, u32) {
 	}
 }
 
-void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
+void Win32Surface::swapchainCreated(Swapchain& swapchain) {
+	if (msgHook) { // already initialized
+		return;
+	}
+
 	std::unique_lock lock(mutex);
+	auto& dev = *swapchain.dev;
+	auto& [width, height] = swapchain.ci.imageExtent;
 	thread = std::thread([&]{ uiThread(dev, width, height); });
 	cv.wait(lock);
 
-	Win32Platform::instance_ = this;
+	Win32Surface::instance_ = this;
 
 	if (auto ptr = InputHooks::instance_.lock()) {
 		this->hooks = std::move(ptr);
@@ -662,32 +672,36 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 	}
 }
 
-Platform::State Win32Platform::update(Gui& gui) {
+bool Win32Surface::needsRendering(Swapchain& swapchain) {
 	// this->gui = &gui;
 	// return ret.load();
 
 	std::unique_lock lock(mutex);
-	this->gui = &gui;
-	this->guiWinPos = gui.windowPos();
-	this->guiWinSize = gui.windowSize();
 
-	if(doGuiUnfocus) {
-		gui.unfocus = true;
-		doGuiUnfocus = false;
+	if (swapchain.overlay && swapchain.overlay->gui)
+	{
+		this->gui = swapchain.overlay->gui;
+		this->guiWinPos = gui->windowPos();
+		this->guiWinSize = gui->windowSize();
 	}
+
+	if(doGuiUnfocus && gui) {
+		gui->unfocus = true;
+	}
+	doGuiUnfocus = false;
 
 	doStuff.store(2);
 	cv.notify_one();
 	cv.wait(lock);
 	// TODO: not thread safe...
-	return state;
+	return state != Win32Surface::State::hidden;
 }
 
 #pragma warning(disable : 4100)
 
 // hooked input functions
 SHORT WINAPI hookedGetAsyncKeyState(int vKey) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		return 0u;
 	}
@@ -696,7 +710,7 @@ SHORT WINAPI hookedGetAsyncKeyState(int vKey) {
 }
 
 SHORT WINAPI hookedGetKeyState(int vKey) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		return 0u;
 	}
@@ -705,7 +719,7 @@ SHORT WINAPI hookedGetKeyState(int vKey) {
 }
 
 BOOL WINAPI hookedGetKeyboardState(__out_ecount(256) PBYTE lpKeyState) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		return false;
 	}
@@ -714,7 +728,7 @@ BOOL WINAPI hookedGetKeyboardState(__out_ecount(256) PBYTE lpKeyState) {
 }
 
 UINT WINAPI hookedGetRawInputData(HRAWINPUT hRawInput, UINT uiCommand, LPVOID pData, PUINT pcbSize, UINT cbSizeHeader) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (!wp.hookInput()) {
 		return wp.hooks->GetRawInputData.forward(hRawInput, uiCommand, pData, pcbSize, cbSizeHeader);
 	}
@@ -737,7 +751,7 @@ UINT WINAPI hookedGetRawInputData(HRAWINPUT hRawInput, UINT uiCommand, LPVOID pD
 }
 
 UINT WINAPI hookedGetRawInputBuffer(PRAWINPUT pData, PUINT pcbSize, UINT cbSizeHeader) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (!wp.hookInput()) {
 		return wp.hooks->GetRawInputBuffer.forward(pData, pcbSize, cbSizeHeader);
 	}
@@ -769,7 +783,7 @@ UINT WINAPI hookedGetRawInputBuffer(PRAWINPUT pData, PUINT pcbSize, UINT cbSizeH
 }
 
 int WINAPI hookedShowCursor(__in BOOL bShow) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		int saveCount = wp.hooks->saved.cursorCount;
         wp.hooks->saved.cursorCount  += bShow ? 1 : -1;
@@ -781,7 +795,7 @@ int WINAPI hookedShowCursor(__in BOOL bShow) {
 }
 
 BOOL WINAPI hookedGetCursorPos(LPPOINT lpPoint) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		if (lpPoint) {
             *lpPoint = wp.hooks->saved.cursorPos;
@@ -794,7 +808,7 @@ BOOL WINAPI hookedGetCursorPos(LPPOINT lpPoint) {
 }
 
 BOOL WINAPI hookedSetCursorPos(int X, int Y) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		wp.hooks->saved.cursorPos = POINT{X, Y};
 		return true;
@@ -804,7 +818,7 @@ BOOL WINAPI hookedSetCursorPos(int X, int Y) {
 }
 
 HCURSOR WINAPI hookedSetCursor(HCURSOR hCursor) {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		wp.hooks->saved.cursor = hCursor;
 		return nullptr;
@@ -814,7 +828,7 @@ HCURSOR WINAPI hookedSetCursor(HCURSOR hCursor) {
 }
 
 HCURSOR	WINAPI hookedGetCursor() {
-	auto& wp = Win32Platform::get();
+	auto& wp = Win32Surface::get();
 	if (wp.hookInput()) {
 		return wp.hooks->saved.cursor;
 	}
@@ -939,7 +953,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 
 	dlg_trace(">> CreateWin32Surface");
 
-	auto& platform = createData<Win32Platform>(*pSurface);
+	auto& platform = createData<Win32Surface>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->hwnd;
 
 	return res;
