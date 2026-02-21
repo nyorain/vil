@@ -47,8 +47,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 	}
 
 	auto platform = moveDataOpt<Surface>(surface); // destroy it
-	dlg_assert(platform->handle == surface);
-	platform->handle = {};
+	if (platform) {
+		dlg_assert(platform->handle == surface);
+		platform->handle = {};
+	}
 
 	auto& ini = getData<Instance>(instance);
 	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
