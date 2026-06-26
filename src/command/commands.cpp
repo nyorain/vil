@@ -2464,6 +2464,10 @@ void BindDescriptorBufferEmbeddedSamplersCmd::record(const Device& dev, VkComman
 	}
 }
 
+void CuLaunchKernelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdCuLaunchKernelNVX(cb, &launchInfo);
+}
+
 // util
 bool isIndirect(const Command& cmd) {
 	return

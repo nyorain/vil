@@ -4349,4 +4349,33 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplers2EXT(
 	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
+VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
+		VkCommandBuffer commandBuffer,
+		const VkCuLaunchInfoNVX* pLaunchInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<CuLaunchKernelCmd>(cb);
+
+	cmd.launchInfo = *pLaunchInfo;
+	cmd.launchInfo.pNext = copyChain(cb, cmd.launchInfo.pNext);
+
+	// I don't get why they use a double pointers here, seems weird.
+	if (cmd.launchInfo.paramCount > 0 && cmd.launchInfo.pParams) {
+		auto buf = copySpan(cb,
+			reinterpret_cast<const std::byte*>(*cmd.launchInfo.pParams),
+			cmd.launchInfo.paramCount);
+		cmd.pParams = buf.data();
+		cmd.launchInfo.pParams = &cmd.pParams;
+	}
+
+	if (cmd.launchInfo.extraCount > 0 && cmd.launchInfo.pExtras) {
+		auto buf = copySpan(cb,
+			reinterpret_cast<const std::byte*>(*cmd.launchInfo.pExtras),
+			cmd.launchInfo.extraCount);
+		cmd.pExtras = buf.data();
+		cmd.launchInfo.pExtras = &cmd.pExtras;
+	}
+
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
 } // namespace vil

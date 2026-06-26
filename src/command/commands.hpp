@@ -184,6 +184,9 @@ enum class CommandType : u32 {
 	setDescriptorBufferOffsets,
 	bindDescriptorBufferEmbeddedSamplers,
 
+	// VK_NVX_binary_import (dlss)
+	cuLaunchKernel,
+
 	count,
 };
 
@@ -1870,6 +1873,16 @@ struct BindDescriptorBufferEmbeddedSamplersCmd final : CmdDerive<Command, Comman
 	Category category() const override { return Category::bind; }
 };
 
+struct CuLaunchKernelCmd final : CmdDerive<Command, CommandType::cuLaunchKernel> {
+	VkCuLaunchInfoNVX launchInfo;
+	void* pParams {};
+	void* pExtras {};
+
+	std::string_view nameDesc() const override { return "CuLaunchKernel"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	// Technically more like a dispatch but we can't inspect state
+	Category category() const override { return Category::other; }
+};
 
 // F: overloaded function type of signature void(<Command Types>*)
 // Will call f with cmd casted to the type indicated by cmdType.
@@ -2008,6 +2021,7 @@ auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	case CT::bindDescriptorBuffers: return f(static_cast<BindDescriptorBuffersCmd*>(cmd));
 	case CT::setDescriptorBufferOffsets: return f(static_cast<SetDescriptorBufferOffsetsCmd*>(cmd));
 	case CT::bindDescriptorBufferEmbeddedSamplers: return f(static_cast<BindDescriptorBufferEmbeddedSamplersCmd*>(cmd));
+	case CT::cuLaunchKernel: return f(static_cast<CuLaunchKernelCmd*>(cmd));
 	case CT::count:
 		dlg_error("Invalid command type");
 	// NOTE: no default case by design so that we get compiler warnings about

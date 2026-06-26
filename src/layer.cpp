@@ -535,41 +535,45 @@ VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(
 	return res;
 }
 
-// tmp test
-void CmdCuLaunchKernelNVX(
-		VkCommandBuffer                             commandBuffer,
-		const VkCuLaunchInfoNVX* pLaunchInfo) {
-
-	(void) commandBuffer;
-	(void) pLaunchInfo;
-
-	dlg_error("uffff wtf");
-	// DebugBreak();
-}
-
-VkResult GetImageViewAddressNVX(
+// DLSS stuff: VK_NVX_IMAGE_VIEW_HANDLE
+VKAPI_ATTR VkResult VKAPI_CALL GetImageViewAddressNVX(
 		VkDevice                                    device,
 		VkImageView                                 imageView,
 		VkImageViewAddressPropertiesNVX* pProperties) {
-	(void) device;
-	(void) imageView;
-	(void) pProperties;
-
-	dlg_error("uffff wtf");
-	// DebugBreak();
-
-	return VK_SUCCESS;
+	auto& imgView = get(device, imageView);
+	auto& dev = *imgView.dev;
+	return dev.dispatch.GetImageViewAddressNVX(dev.handle, imgView.handle,
+		pProperties);
 }
 
-uint32_t GetImageViewHandleNVX(
-		VkDevice                                    device,
+VKAPI_ATTR uint32_t VKAPI_CALL GetImageViewHandleNVX(
+		VkDevice device,
 		const VkImageViewHandleInfoNVX* pInfo) {
-	(void) device;
-	(void) pInfo;
-	dlg_error("uffff wtf");
-	// DebugBreak();
+	auto info = *pInfo;
+	auto& imgView = get(device, info.imageView);
+	auto& dev = *imgView.dev;
+	info.imageView = imgView.handle;
+	if (info.sampler) {
+		auto& sampler = get(device, info.sampler);
+		info.sampler = sampler.handle;
+	}
 
-	return 0u;
+	return imgView.dev->dispatch.GetImageViewHandleNVX(dev.handle, &info);
+}
+
+VKAPI_ATTR uint64_t VKAPI_CALL GetImageViewHandle64NVX(
+		VkDevice device,
+		const VkImageViewHandleInfoNVX* pInfo) {
+	auto info = *pInfo;
+	auto& imgView = get(device, info.imageView);
+	auto& dev = *imgView.dev;
+	info.imageView = imgView.handle;
+	if (info.sampler) {
+		auto& sampler = get(device, info.sampler);
+		info.sampler = sampler.handle;
+	}
+
+	return imgView.dev->dispatch.GetImageViewHandle64NVX(dev.handle, &info);
 }
 
 struct HookedFunction {
@@ -1159,9 +1163,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdBindDescriptorBufferEmbeddedSamplers2EXT, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME),
 
 	// For dlss testing.
-	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
-	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
-	// VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetImageViewHandle64NVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
 }};
 
 #undef VIL_INI_HOOK

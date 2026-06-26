@@ -1081,4 +1081,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplers2EXT(
     VkCommandBuffer                             commandBuffer,
     const VkBindDescriptorBufferEmbeddedSamplersInfoEXT* pBindDescriptorBufferEmbeddedSamplersInfo);
 
+// DLSS: VK_NVX_BINARY_IMPORT
+VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
+	VkCommandBuffer commandBuffer,
+	const VkCuLaunchInfoNVX* pLaunchInfo);
+
 } // namespace vil
