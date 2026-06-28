@@ -208,7 +208,8 @@ MatchVal matchStages(span<const PipelineShaderStage> a,
 }
 
 MatchVal matchPipe(const GraphicsPipeline& a, const GraphicsPipeline& b) {
-	if(!equal(a.renderPass->desc, b.renderPass->desc) || a.subpass != b.subpass) {
+	// TODO: fix for dynamic rendering
+	if(a.renderPass && b.renderPass && (!equal(a.renderPass->desc, b.renderPass->desc) || a.subpass != b.subpass)) {
 		return MatchVal::noMatch();
 	}
 
