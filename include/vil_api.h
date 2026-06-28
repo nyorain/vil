@@ -8,25 +8,38 @@
 #include <stdint.h>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
-  // XXX NOTE ATTENTION: this header includes windows.h.
-  // Just as a fair warning, this might break your application and will to live.
-  // Nothing we can really do about it, we need the functions to load func pointers.
-  // A possible workaround would be to move the vilLoadApi implementation
-  // out of the header, into a separate file.
-  #include <windows.h>
+	#ifdef __cplusplus
+		extern "C" {
+	#endif // __cplusplus
 
-  // Needs to be defined when renamed the dll or compiled it e.g.
-  // via MinGW. Must match the name of the lib that is loaded/registered as layer.
-  #ifndef VIL_LIB_NAME
-	#define VIL_LIB_NAME "VkLayer_live_introspection.dll"
-  #endif // VIL_LIB_NAME
+	#if defined(_WIN64)
+		typedef int64_t (__stdcall *FARPROC)(void);
+	#else
+		typedef int (__stdcall *FARPROC)(void);
+	#endif
+
+	// As "windows.h" keeps breaking applications and my will to live,
+	// we just forward-declare only the functions we need here.
+	// The shipped header is quite messy, refer to https://github.com/Leandros/WindowsHModular
+	void* __stdcall GetModuleHandleA(const char* lpModuleName);
+	FARPROC __stdcall GetProcAddress(void* hModule, const char* lProcName);
+
+	#ifdef __cplusplus
+		} // extern C
+	#endif // __cplusplus
+
+	// Needs to be defined when renamed the dll or compiled it e.g.
+	// via MinGW. Must match the name of the lib that is loaded/registered as layer.
+	#ifndef VIL_LIB_NAME
+		#define VIL_LIB_NAME "VkLayer_live_introspection.dll"
+	#endif // VIL_LIB_NAME
 #else
-  #include <dlfcn.h>
-  #include <errno.h>
+	#include <dlfcn.h>
+	#include <errno.h>
 
-  #ifndef VIL_LIB_NAME
-	#define VIL_LIB_NAME "libVkLayer_live_introspection.so"
-  #endif // VIL_LIB_NAME
+	#ifndef VIL_LIB_NAME
+		#define VIL_LIB_NAME "libVkLayer_live_introspection.so"
+	#endif // VIL_LIB_NAME
 #endif
 
 // Forward delcartion from vulkan.h to not include it here.
