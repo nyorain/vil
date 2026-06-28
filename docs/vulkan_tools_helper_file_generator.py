@@ -22,7 +22,15 @@
 # Author: John Zulauf <jzulauf@lunarg.com>
 #
 # NOTE: adjusted for vil, added dynamic dispatch overload at the bottom.
-# Just copy this into the Vulkan-Tools repository and generate the typemap_helper.h file
+# Just copy this into the Vulkan-Tools repository (scripts/generators)
+# and generate the typemap_helper.h file by running:
+# - cd scripts
+# - ./generate_source.py --api vulkan Vulkan-Headers/registry -o out/
+# - copy out/icd/generated/vk_typemap_helper.h to vil (src/vk/typemap_helper.h)
+# Make sure the local Vulkan-Headers in that folder is synced to the right
+# version.
+# IMPORTANT make sure to replace #include <vulkan/vulkan.h> with <vk/vulkan.h>
+#  to use our own local headers.
 
 from base_generator import BaseGenerator
 
@@ -108,14 +116,8 @@ template <typename T> struct LvlTypeMap {};
  # Define the utilities (here so any renaming stays consistent), if this grows large, refactor to a fixed .h file
 
         out.append('''// Header "base class" for pNext chain traversal
-struct LvlGenericHeader {
-   VkStructureType sType;
-   const LvlGenericHeader *pNext;
-};
-struct LvlGenericModHeader {
-   VkStructureType sType;
-   LvlGenericModHeader *pNext;
-};
+using LvlGenericHeader = VkBaseInStructure;
+using LvlGenericModHeader = VkBaseOutStructure;
 
 // Find an entry of the given type in the pNext chain
 template <typename T> const T *lvl_find_in_chain(const void *next) {

@@ -1300,3 +1300,43 @@ check has to be done.
 We could probably extend this to even simpler handling for single-use
 records.
 
+# Multiple swapchains
+
+We currently just support a single gui (per device). Everything else is
+overkill and we probably don't want that.
+When we create a window:
+- it should be possible to select the swapchain you see the commands/
+  timings from. In UI overview already?
+
+When the application creates an overlay:
+- the api allows just for a single overlay, creating a second one fails
+- you can still select the swapchain you want to see the commands/etc from
+
+When VIL_HOOK_OVERLAY is set things get complicated. How to decide which
+swapchain gets the overlay? Maybe don't create the overlay already on swapchain
+creation. Only create it once we know we want the overlay on this swapchain, i.e.
+as soon as it should be shown?
+The Surface implementation that really only acts as input grabber.
+It gets informed as soon as the overlay is created/destroyed?
+When one surface already has an overlay and it is opened on another
+window, we remove the one from the first surface and show it on the second?
+Would need really careful synchronization, swapchain-creation, queue-present
+and hooked input handling can happen in different threads.
+
+Where does the overlay live? Member of dev? Probably the easiest.
+
+# Command viewing for gui applications
+
+GUI-focused applications (in comparison to games) might redraw lazily, see
+e.g. GDK4 applications rendered with Vulkan.
+This makes the command viewer in the swapchain mode a mess.
+
+Alternative idea: Display the submitted commands more like a profiling
+timeline. The user can freely navigate around in that.
+When a command is selected, we can still try to find commands like that in
+the current frame (e.g. same pipeline used, same position in frame
+just as optional condition?) for introspection.
+
+Could even go one step further and allow explicit command searching/finding.
+Like "show me commands using this pipe"
+And maybe then also what to capture for those commands?

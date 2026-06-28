@@ -1054,7 +1054,7 @@ std::vector<CompletedHook> CommandHook::moveCompleted() {
 		//  commands, we also want to show the full frame, not just
 		//  partial state
 		if(target_.type == CommandHookTargetType::inFrame) {
-			auto swapchain = dev_->swapchainPtrLocked();
+			auto swapchain = dev_->lastSwapchainPtrLocked();
 			dlg_assert(swapchain);
 
 			while(swapchain && !moved.empty()) {

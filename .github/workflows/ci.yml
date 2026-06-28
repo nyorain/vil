@@ -163,8 +163,7 @@ jobs:
       with:
         python-version: '3.x'
     - run: pip install ninja
-    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
-    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
+    - run: pip install meson
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
@@ -182,8 +181,7 @@ jobs:
       with:
         python-version: '3.x'
     - run: pip install ninja
-    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
-    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
+    - run: pip install meson
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
@@ -209,8 +207,7 @@ jobs:
     # - name: Install Vulkan SDK
     #   run: .\VulkanSDK.exe --accept-licenses --default-answer --confirm-command install
     - run: pip install ninja
-    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
-    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
+    - run: pip install meson
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
@@ -242,8 +239,7 @@ jobs:
       with:
         python-version: '3.x'
     - run: pip install ninja
-    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
-    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
+    - run: pip install meson
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:

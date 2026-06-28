@@ -46,6 +46,9 @@ struct DisplayWindow {
 	void doCleanup();
 	void close();
 
+	void closeWait();
+	void startThread();
+
 private:
 	std::thread thread_;
 	std::atomic<bool> run_ {true};
@@ -56,6 +59,7 @@ private:
 
 	std::vector<RenderBuffer> buffers_;
 	std::vector<const char*> devExts_;
+	bool recreateSwapchain_ {};
 
 	enum class State {
 		initial,

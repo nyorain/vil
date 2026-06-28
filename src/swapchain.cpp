@@ -5,22 +5,32 @@
 #include <image.hpp>
 #include <sync.hpp>
 #include <queue.hpp>
-#include <platform.hpp>
+#include <surface.hpp>
 #include <overlay.hpp>
 #include <command/record.hpp>
 #include <util/profiling.hpp>
+#include <util/chain.hpp>
 #include <vkutil/enumString.hpp>
 
 namespace vil {
 
 Swapchain::~Swapchain() {
-	overlay.reset();
 	destroy();
 }
 
 void Swapchain::destroy() {
 	if(!dev) {
 		return;
+	}
+
+	{
+		std::lock_guard lock(dev->mutex);
+		if (overlay) {
+			dlg_assert(dev->overlay.get() == overlay);
+			dev->overlay.reset();
+		}
+
+		surface = nullptr;
 	}
 
 	for(auto* img : this->images) {
@@ -38,9 +48,6 @@ void Swapchain::destroy() {
 			memBind.memState = FullMemoryBind::State::resourceDestroyed;
 		}
 
-		// TODO: call onApiDestroy? shouldn't be needed atm but might
-		// be in future. Not sure if expected, the api object
-		// was always of implicit nature.
 		dev->images.mustErase(handle);
 	}
 
@@ -57,7 +64,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& dev = getDevice(device);
-	auto* platform = findData<Platform>(pCreateInfo->surface);
+	// might be null on backends without hook impl
+	auto* surface = findData<Surface>(pCreateInfo->surface);
 
 	// It's important we *first* destroy our image objects coming
 	// from this swapchain since they may implicitly destroyed
@@ -66,8 +74,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	// be destroyed via vulkan spec and the old swapchain becomes
 	// unusable.
 	Swapchain* oldChain {};
-	std::unique_ptr<Overlay> savedOverlay {};
-	bool recreateOverlay {false};
+	Overlay* transferOverlay {};
 	if(pCreateInfo->oldSwapchain) {
 		// NOTE: valid per spec to pass in swapchains created by
 		// ANOTHER device. Don't handle this case rn but need to ignore
@@ -76,21 +83,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		oldChain = dev.swapchains.find(pCreateInfo->oldSwapchain);
 
 		if(oldChain) {
+			{
+				std::lock_guard lock(dev.mutex);
+				dlg_assert(oldChain->surface == surface);
+				transferOverlay = oldChain->overlay;
+				oldChain->overlay = nullptr;
+				oldChain->surface = nullptr;
+			}
+
 			// This is important to destroy our handles of the swapchain
 			// images.
 			oldChain->destroy();
-
-			if(oldChain->overlay) {
-				if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
-					// Have to make sure previous rendering has finished.
-					// We can be sure gui isn't starting new draws in another
-					// thread.
-					oldChain->overlay->gui->waitForDraws();
-					savedOverlay = std::move(oldChain->overlay);
-				} else {
-					recreateOverlay = true;
-				}
-			}
 		}
 	}
 
@@ -129,6 +132,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.dev = &dev;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
+	swapd.surface = surface;
 	swapd.supportsSampling = (sci.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT);
 
 	// use data from old swapchain
@@ -184,34 +188,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		dev.images.mustEmplace(handleDown, std::move(imgPtr));
 	}
 
-	dlg_trace(">> Createswapchain. platform: {}, dev.gui {}", platform, dev.gui());
+	if (transferOverlay) {
+		transferOverlay->init(swapd);
 
-	if(savedOverlay) {
-		dlg_trace(">>savedOverlay");
+		std::lock_guard lock(dev.mutex);
+		swapd.overlay = transferOverlay;
+	}
 
-		swapd.overlay = std::move(savedOverlay);
-		swapd.overlay->swapchain = &swapd;
-
-		{
-			std::lock_guard lock(dev.mutex);
-			swapd.overlay->initRenderBuffers();
-		}
-
-		if(swapd.overlay->platform) {
-			swapd.overlay->platform->resize(swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
-		}
-	} else if(recreateOverlay) {
-		// Otherwise we have to create a new renderer from scratch.
-		// Carry over all gui logic. Just recreate rendering logic
-		dlg_error("TODO: not implemented");
-	} else if(platform) {
-		dlg_trace(">> creating overlay");
-
-		swapd.overlay = std::make_unique<Overlay>();
-		swapd.overlay->init(swapd);
-
-		swapd.overlay->platform = platform;
-		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
+	if (surface) {
+		surface->swapchainCreated(swapd);
 	}
 
 	dev.swapchain(IntrusivePtr<Swapchain>(&swapd));
@@ -229,6 +214,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 	auto swapchainPtr = mustMoveUnset(device, swapchain);
 	auto& dev = *swapchainPtr->dev;
 	dev.swapchainDestroyed(*swapchainPtr);
+
+	if (swapchainPtr->surface) {
+		swapchainPtr->surface->swapchainDestroyed(*swapchainPtr);
+	}
 	swapchainPtr->destroy();
 
 	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
@@ -375,32 +364,85 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
-		const auto supportedExts = {
+		bool visibleOverlay {};
+
+		{
+			std::unique_lock lock(dev.mutex);
+			if (swapchain.overlay && !swapchain.overlay->hooked) {
+				visibleOverlay = swapchain.overlay->gui->visible();
+			} else if (swapchain.surface) {
+				auto* osurf = dynamic_cast<OverlaySurface*>(swapchain.surface);
+				if (osurf) {
+					visibleOverlay = osurf->needsRendering(swapchain);
+					// swapchain.overlay->gui->visible(visibleOverlay);
+
+					if (swapchain.overlay && !visibleOverlay) {
+						// keep dev.overlay alive for now, cached
+						swapchain.overlay->swapchain = nullptr;
+						swapchain.overlay = nullptr;
+					} else if (!swapchain.overlay && visibleOverlay) {
+						if (dev.overlay) {
+							if (dev.overlay->swapchain) {
+								dlg_assert(dev.overlay->swapchain->overlay == dev.overlay.get());
+								dev.overlay->swapchain->overlay = nullptr;
+							}
+
+							dev.overlay->swapchain = &swapchain;
+							dev.overlay->hooked = true;
+							swapchain.overlay = dev.overlay.get();
+
+							lock.unlock();
+							dev.overlay->init(swapchain);
+						}
+					}
+				}
+			}
+		}
+
+		if (!swapchain.overlay && visibleOverlay) {
+			activateOverlay(swapchain, true);
+			if (swapchain.overlay) {
+				dlg_assert(swapchain.overlay->gui);
+				swapchain.overlay->gui->visible(true);
+			}
+		}
+
+		// TODO: whole chain copying probably only needed when we
+		// present via overlay? Should forward exts!
+		const auto nopExts = {
 			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT,
 			VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
 			// NOTE: only works when fence is wrapped
 			VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR,
 		};
-		dlg_check({
-			auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
-			while (it) {
-				if(!contains(supportedExts, it->sType)) {
-					dlg_warn("unhandled queue present pNext {}", it->sType);
+
+		ThreadMemScope tms;
+		bool chainModified = false;
+		auto chainFunc = [&](VkBaseOutStructure& ext) {
+			// ignore present regions when we have an overlay
+			if (ext.sType == VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR) {
+				if (visibleOverlay) {
+					chainModified = true;
+					return false;
 				}
-				it = it->pNext;
+
+				return true;
 			}
-		});
 
-		bool visible {};
-		if(swapchain.overlay && swapchain.overlay->platform) {
-			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
-			visible = (state != Platform::State::hidden);
+			if(!contains(nopExts, ext.sType)) {
+				dlg_warn("unhandled queue present pNext {}", ext.sType);
+			}
 
-			std::lock_guard lock(dev.mutex);
-			swapchain.overlay->gui->visible(visible);
-		} else if(swapchain.overlay) {
-			std::lock_guard lock(dev.mutex);
-			visible = swapchain.overlay->gui->visible();
+			return true;
+		};
+		auto copiedChain = copyChainLocal(tms, pPresentInfo->pNext, chainFunc);
+
+		auto npi = *pPresentInfo;
+		npi.pImageIndices = &pPresentInfo->pImageIndices[i];
+		npi.pSwapchains = &pPresentInfo->pSwapchains[i];
+		npi.swapchainCount = 1u;
+		if (chainModified) {
+			npi.pNext = copiedChain;
 		}
 
 		// update tracked frameSubmissions and timings before drawing
@@ -408,36 +450,31 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		// can already be displayed.
 		swapchainPresent(swapchain);
 
-		if(swapchain.overlay && visible) {
+		if(swapchain.overlay && visibleOverlay) {
 			span<const VkSemaphore> waitSems;
 			if(i == 0u) {
 				waitSems = {
-					pPresentInfo->pWaitSemaphores,
-					pPresentInfo->waitSemaphoreCount
+					npi.pWaitSemaphores,
+					npi.waitSemaphoreCount
 				};
 			} else {
 				dlg_warn("Having to present without wait semaphores");
 			}
 
+			// TODO: forward pNext chain!
 			res = swapchain.overlay->drawPresent(qd, waitSems,
 				pPresentInfo->pImageIndices[i]);
 		} else {
-			VkPresentInfoKHR pi {};
-			pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-			pi.pImageIndices = &pPresentInfo->pImageIndices[i];
-			pi.pSwapchains = &pPresentInfo->pSwapchains[i];
-			pi.swapchainCount = 1u;
 			if(i == 0u) {
-				pi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-				pi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
+				npi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
+				npi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
 			} else if(pPresentInfo->waitSemaphoreCount) {
 				dlg_warn("Having to present without wait semaphores");
 			}
-			pi.pNext = pPresentInfo->pNext;
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
 			ZoneScopedN("dispatch");
-			res = qd.dev->dispatch.QueuePresentKHR(queue, &pi);
+			res = qd.dev->dispatch.QueuePresentKHR(queue, &npi);
 		}
 
 		if(pPresentInfo->pResults) {

@@ -164,7 +164,7 @@ private:
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};
 		const BeginRenderingCmd* beginRenderingCmd {};
-		const RenderPassInstanceState* rpi {};
+		std::optional<RenderPassInstanceState> rpi {};
 		const CommandDescriptorSnapshot* descriptors {};
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy

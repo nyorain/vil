@@ -8,7 +8,6 @@
 #include <chrono>
 #include <optional>
 #include <array>
-#include <memory>
 
 namespace vil {
 
@@ -17,7 +16,8 @@ struct Swapchain : SharedDeviceHandle {
 
 	VkSwapchainKHR handle {};
 	VkSwapchainCreateInfoKHR ci;
-	std::unique_ptr<Overlay> overlay;
+	Surface* surface {};
+	Overlay* overlay {};
 
 	// The VkImages associated with this swapchain
 	std::vector<Image*> images;
