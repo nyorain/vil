@@ -10,6 +10,7 @@ namespace vil {
 /// Note that Approx does not use this epsilon hardcoded but will mutiply
 /// it with the maximum of the compared values.
 constexpr auto defaultApproxEpsilon = 0.00000001;
+class f16;
 
 /// Represents an approximite value of type T.
 /// Usually type T is a floating-point value or something related to it, like
@@ -26,7 +27,7 @@ Approx<T> approx(const T& value, double epsilon = defaultApproxEpsilon);
 template<typename T>
 class Approx {
 public:
-	static_assert(std::is_floating_point_v<T>,
+	static_assert(std::is_floating_point_v<T> || std::is_same_v<T, f16>,
 		"nytl::Approx only works for floating point types");
 
 	friend bool operator==(T lhs, const Approx& rhs) {

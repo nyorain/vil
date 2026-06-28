@@ -123,7 +123,8 @@ public:
 	static vil::f16 signaling_NaN() { return vil::f16(0, 31, 1); }
 };
 
-template<> struct is_floating_point<::vil::f16> : std::true_type {};
+// Not allowed by C++20
+// template<> struct is_floating_point<::vil::f16> : std::true_type {};
 
 } // namespace std
 
