@@ -112,6 +112,8 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_KHR_maintenance6",
 	"VK_EXT_depth_clamp_control",
 	"VK_KHR_maintenance9",
+	"VK_NVX_binary_import",
+	"VK_NVX_image_view_handle",
 
 	// likely supported, mostly no-ops for vil itself
 	"VK_EXT_depth_range_unrestricted",
@@ -357,8 +359,6 @@ constexpr std::string_view supportedDevExts[] = {
 
 // Known/look like they might cause problems or crashes.
 constexpr std::string_view unsupportedDevExts[] = {
-	"VK_NVX_binary_import",
-	"VK_NVX_image_view_handle",
 	"VK_EXT_transform_feedback",
 	"VK_EXT_debug_marker",
 	"VK_ANDROID_native_buffer",

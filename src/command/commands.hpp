@@ -1875,8 +1875,6 @@ struct BindDescriptorBufferEmbeddedSamplersCmd final : CmdDerive<Command, Comman
 
 struct CuLaunchKernelCmd final : CmdDerive<Command, CommandType::cuLaunchKernel> {
 	VkCuLaunchInfoNVX launchInfo;
-	void* pParams {};
-	void* pExtras {};
 
 	std::string_view nameDesc() const override { return "CuLaunchKernel"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;

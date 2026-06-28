@@ -4357,22 +4357,70 @@ VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
 
 	cmd.launchInfo = *pLaunchInfo;
 	cmd.launchInfo.pNext = copyChain(cb, cmd.launchInfo.pNext);
+	dlg_assert(!cmd.launchInfo.pNext);
 
-	// I don't get why they use a double pointers here, seems weird.
 	if (cmd.launchInfo.paramCount > 0 && cmd.launchInfo.pParams) {
+		dlg_info("param0: {}", cmd.launchInfo.pParams[0]);
+
 		auto buf = copySpan(cb,
-			reinterpret_cast<const std::byte*>(*cmd.launchInfo.pParams),
+			cmd.launchInfo.pParams,
 			cmd.launchInfo.paramCount);
-		cmd.pParams = buf.data();
-		cmd.launchInfo.pParams = &cmd.pParams;
+		cmd.launchInfo.pParams = buf.data();
 	}
 
 	if (cmd.launchInfo.extraCount > 0 && cmd.launchInfo.pExtras) {
-		auto buf = copySpan(cb,
-			reinterpret_cast<const std::byte*>(*cmd.launchInfo.pExtras),
-			cmd.launchInfo.extraCount);
-		cmd.pExtras = buf.data();
-		cmd.launchInfo.pExtras = &cmd.pExtras;
+		// See https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/40686
+		// extraCount is incorrectly documented in the vulkan spec.
+
+		/* extra launch parameters taken from vkd3d-proton */
+#define CU_LAUNCH_PARAM_BUFFER_POINTER ((const void *)0x01)
+#define CU_LAUNCH_PARAM_BUFFER_SIZE    ((const void *)0x02)
+#define CU_LAUNCH_PARAM_END            ((const void *)0x00)
+
+		auto count = 0u;
+		auto* extra = cmd.launchInfo.pExtras;
+		u32 idBufPointer = u32(-1);
+		u32 idBufSize = u32(-1);
+
+		while (*extra) {
+			if (*extra == CU_LAUNCH_PARAM_BUFFER_POINTER) {
+				dlg_assert(idBufPointer == u32(-1));
+				++extra;
+				++count;
+				idBufPointer = count;
+			 }
+			 if (*extra == CU_LAUNCH_PARAM_BUFFER_SIZE) {
+				++extra;
+				++count;
+				idBufSize = count;
+			 }
+
+			++count;
+			++extra;
+		}
+
+		++count; // for terminator
+
+		auto extraBuf = copySpan(cb, cmd.launchInfo.pExtras, count);
+		cmd.launchInfo.pExtras = extraBuf.data();
+
+		if (idBufPointer != u32(-1) && idBufSize != u32(-1)) {
+			dlg_assert(pLaunchInfo->paramCount == 0);
+			auto srcBuffer = (std::byte*) extraBuf[idBufPointer];
+			auto srcBufferSize = *(u32*) extraBuf[idBufSize];
+			auto paramBuf = copySpan(cb, srcBuffer, srcBufferSize);
+
+			// auto cpy = ReadBuf(paramBuf);
+			// while(!cpy.empty()) {
+			// 	dlg_trace(">> {}{}", std::hex, read<u64>(cpy));
+			// }
+			// dlg_trace("idBufPointer {}, paramBufferSize {}, extraCount {}",
+			// 	idBufPointer, srcBufferSize, count);
+
+			dlg_assert(idBufPointer != u32(-1));
+			extraBuf[idBufPointer] = (void*) paramBuf.data();
+			extraBuf[idBufSize] = (void*) &construct<u32>(cb, srcBufferSize);
+		}
 	}
 
 	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
