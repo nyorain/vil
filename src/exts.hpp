@@ -37,6 +37,7 @@ constexpr std::string_view supportedInstanceExts[] = {
 	"VK_LUNARG_direct_driver_loading", // nop
 	"VK_KHR_surface_maintenance1", // nop
 	"VK_EXT_swapchain_colorspace", // nop
+	"VK_EXT_validation_features", // nop
 };
 
 constexpr std::string_view unsupportedInstanceExts[] = {
@@ -222,7 +223,6 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_KHR_separate_depth_stencil_layouts", // not 100% sure about rp splitting
 	"VK_EXT_tooling_info", // TODO: actively implement!
 	"VK_EXT_separate_stencil_usage",
-	"VK_EXT_validation_features",
 	"VK_NV_cooperative_matrix",
 	"VK_NV_coverage_reduction_mode",
 	"VK_EXT_fragment_shader_interlock",
