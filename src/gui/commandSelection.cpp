@@ -70,7 +70,7 @@ bool CommandSelection::update() {
 	ThreadMemScope tms;
 	u32 bestPresentID = {};
 
-	auto swapchain = dev.swapchain();
+	auto swapchain = dev.lastSwapchain();
 
 	auto frameForSubmissionLocked = [&](u32 submissionID) -> const FrameSubmissions* {
 		assertOwned(dev.mutex);
@@ -227,7 +227,7 @@ void CommandSelection::select(std::vector<FrameSubmission> frame,
 	frame_ = std::move(frame);
 
 	// TODO: HACK, see todo on multi-swapchain support
-	auto swapchain = dev_->swapchain();
+	auto swapchain = dev_->lastSwapchain();
 	dlg_assertl(dlg_level_warn, swapchain); // only warning cause our logic is racy
 	if(swapchain) {
 		swapchainPresent_ = swapchain->presentCounter;

@@ -146,8 +146,11 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 }
 
 void Gui::destroyRenderStuff() {
-	auto vkDev = dev_->handle;
+	for(auto& draw : draws_) {
+		dlg_assert (!draw->inUse);
+	}
 
+	auto vkDev = dev_->handle;
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
@@ -1000,7 +1003,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	// swapchain stuff
-	auto swapchain = dev.swapchain();
+	auto swapchain = dev.lastSwapchain();
 
 	if(swapchain) {
 		if(ImGui::Button("View per-frame submissions")) {
@@ -1135,6 +1138,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::Checkbox("Show cursor", &io_->MouseDrawCursor);
 
 		ImGui::Checkbox("Show debug window", &showDebug);
+
+		ImGui::Separator();
+	}
+
+	if (platformUI) {
+		platformUI();
 	}
 }
 
@@ -1563,7 +1572,7 @@ void Gui::activateTab(Tab tab) {
 		// when we first swtich to the command tab, select the swapchain
 		// by default (if there is any)
 		assertNotOwned(dev_->mutex);
-		if(auto sc = dev_->swapchain(); sc) {
+		if(auto sc = dev_->lastSwapchain(); sc) {
 			tabs_.cb->showSwapchainSubmissions(*sc, true);
 		}
 	}
@@ -2403,6 +2412,7 @@ void Gui::updateColorFormat(VkFormat newColorFormat) {
 		return;
 	}
 
+	waitForDraws();
 	colorFormat_ = newColorFormat;
 	initRenderStuff();
 }

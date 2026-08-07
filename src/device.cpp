@@ -187,12 +187,12 @@ Gui& Device::getOrCreateGui(VkFormat colorFormat) {
 	return *gui_;
 }
 
-IntrusivePtr<Swapchain> Device::swapchain() {
+IntrusivePtr<Swapchain> Device::lastSwapchain() {
 	std::lock_guard lock(this->mutex);
 	return swapchain_;
 }
 
-IntrusivePtr<Swapchain> Device::swapchainPtrLocked() {
+IntrusivePtr<Swapchain> Device::lastSwapchainPtrLocked() {
 	assertOwned(this->mutex);
 	return swapchain_;
 }
@@ -377,7 +377,7 @@ VkResult doCreateDevice(
 
 	// copy the pNext chain so we can modify it.
 	std::unique_ptr<std::byte[]> copiedChain;
-	auto* pNext = copyChainPatch(nci.pNext, copiedChain);
+	auto* pNext = copyChainReplace(nci.pNext, copiedChain);
 
 	// = Queues =
 	// Make sure we get a graphics queue.

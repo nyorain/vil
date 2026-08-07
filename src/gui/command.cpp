@@ -138,15 +138,21 @@ void CommandViewer::unselect() {
 	record_.reset();
 }
 
-const RenderPassInstanceState* findRPI(span<const Command* const> cmdh) {
+std::optional<RenderPassInstanceState> findRPI(span<const Command* const> cmdh) {
 	for(auto* cmd : cmdh) {
 		auto renderSection = dynamic_cast<const RenderSectionCommand*>(cmd);
 		if(renderSection) {
-			return &renderSection->rpi;
+			return renderSection->rpi;
 		}
 	}
 
-	return nullptr;
+	if (!cmdh.empty() && cmdh.back()->type() == CommandType::beginRenderPass) {
+		RenderPassInstanceState rpi;
+		rpi.colorAttachments = deriveCast<const BeginRenderPassCmd*>(cmdh.back())->attachments;
+		return rpi;
+	}
+
+	return {};
 }
 
 void CommandViewer::updateFromSelector(bool forceUpdateHook) {
@@ -159,6 +165,8 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 
 	const DrawCmdBase* drawCmd {};
 	const StateCmdBase* stateCmd {};
+	const RenderSectionCommand* rsc {};
+	const BeginRenderPassCmd* rpc {};
 
 	dlg_assert(!cmdh.empty());
 
@@ -173,6 +181,12 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 			break;
 		case CommandCategory::traceRays:
 			stateCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
+			break;
+		case CommandCategory::renderSection:
+			rsc = deriveCast<const RenderSectionCommand*>(&cmd);
+			break;
+		case CommandCategory::beginRenderPass:
+			rpc = deriveCast<const BeginRenderPassCmd*>(&cmd);
 			break;
 		default:
 			break;
@@ -194,17 +208,21 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 			}
 			break;
 		case IOView::attachment: {
-			if(!drawCmd) {
+			if(!drawCmd && !rsc && !rpc) {
 				selectCommandView = true;
 				break;
 			}
 
 			auto [type, id] = viewData_.attachment;
 
-			auto* lastRPI = findRPI(command_);
-			auto* newRPI = findRPI(cmdh);
+			auto lastRPI = findRPI(command_);
+			auto newRPI = findRPI(cmdh);
 			dlg_assert(lastRPI);
 			dlg_assert(newRPI);
+			if (!lastRPI || !newRPI) {
+				selectCommandView = true;
+				break;
+			}
 
 			auto& rpiNew = *newRPI;
 			auto& rpiOld = *lastRPI;
@@ -737,15 +755,21 @@ void CommandViewer::displayIOList() {
 	displayDsList();
 
 	// Attachments
-	if(drawCmd) {
+	const RenderSectionCommand* rsc {};
+	const BeginRenderPassCmd* rpc {};
+	if (cmd.category() == Command::Category::renderSection) {
+		rsc = static_cast<const RenderSectionCommand*>(&cmd);
+	}
+	if (cmd.type() == CommandType::beginRenderPass) {
+		rpc = static_cast<const BeginRenderPassCmd*>(&cmd);
+	}
+
+	if(drawCmd || rsc || rpc) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		auto toplevelFlags = ImGuiTreeNodeFlags_FramePadding |
 			ImGuiTreeNodeFlags_SpanFullWidth;
 		if(ImGui::TreeNodeEx("Attachments", toplevelFlags)) {
-			auto* pRPI = findRPI(command_);
-
-			if(pRPI) {
-				auto& rpi = *pRPI;
+			if(auto rpi = findRPI(command_); rpi) {
 				auto addAttachment = [&](const std::string& label, AttachmentType type,
 						unsigned id, ImageView* view) {
 					if(!view) {
@@ -774,21 +798,22 @@ void CommandViewer::displayIOList() {
 
 				// IDEA: name them if possible? Could use names from (fragment)
 				// shader. Or names of image/imageView?
-				for(auto [c, att] : enumerate(rpi.colorAttachments)) {
-					auto label = dlg::format("Color Attachment {}", c);
+				for(auto [c, att] : enumerate(rpi->colorAttachments)) {
+					auto label = dlg::format("{} {}",
+						rpc ? "Attachment" : "Color Attachment", c);
 					addAttachment(label, AttachmentType::color, c, att);
 				}
 
-				for(auto [c, att] : enumerate(rpi.inputAttachments)) {
+				for(auto [c, att] : enumerate(rpi->inputAttachments)) {
 					auto label = dlg::format("Input Attachment {}", c);
 					addAttachment(label, AttachmentType::input, c, att);
 				}
 
 				// depth-stencil
-				if(rpi.depthStencilAttachment) {
+				if (rpi->depthStencilAttachment) {
 					auto label = dlg::format("Depth Stencil");
-					addAttachment(label, AttachmentType::depthStencil,
-						0u, rpi.depthStencilAttachment);
+					addAttachment(label, AttachmentType::depthStencil, 0,
+						rpi->depthStencilAttachment);
 				}
 
 				// NOTE: display preserve attachments? resolve attachments?
@@ -1141,7 +1166,10 @@ void CommandViewer::displayDs(Draw& draw) {
 
 void CommandViewer::displayAttachment(Draw& draw) {
 	dlg_assert_or(!command_.empty(), return);
-	dlg_assert_or(command_.back()->category() == CommandCategory::draw, return);
+	dlg_assert_or(
+		command_.back()->category() == CommandCategory::draw ||
+		command_.back()->category() == CommandCategory::renderSection ||
+		command_.back()->category() == CommandCategory::beginRenderPass, return);
 	// auto* drawCmd = deriveCast<const DrawCmdBase*>(command_.back());
 
 	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
@@ -1640,7 +1668,9 @@ void CommandViewer::draw(Draw& draw, bool skipList) {
 	auto actionCmd = bcmd.category() == CommandCategory::dispatch ||
 		bcmd.category() == CommandCategory::draw ||
 		bcmd.category() == CommandCategory::traceRays ||
-		bcmd.category() == CommandCategory::transfer;
+		bcmd.category() == CommandCategory::transfer ||
+		bcmd.category() == CommandCategory::renderSection ||
+		bcmd.category() == CommandCategory::beginRenderPass;
 
 	dlg_assert(actionCmd || view_ == IOView::command);
 	if(!actionCmd) {
@@ -1782,6 +1812,11 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 
 	dlg_assert(img.aspectMask);
 	dlg_assert(img.image);
+
+	if (!img.image) {
+		ImGui::Text("Copying failed");
+		return;
+	}
 
 	auto hookState = selection().completedHookState();
 	dlg_assert(hookState);

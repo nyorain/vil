@@ -6,7 +6,7 @@
 
 namespace vil {
 
-template<typename F> bool extCastCall(const LvlGenericHeader& header, F&& f) {
+template<typename F> bool extCastCall(const VkBaseInStructure& header, F&& f) {
 	switch(header.sType) {
 		case VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO: f(reinterpret_cast<const VkLayerInstanceCreateInfo&>(header)); return true;
 		case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO: f(reinterpret_cast<const VkLayerDeviceCreateInfo&>(header)); return true;
@@ -17,7 +17,7 @@ template<typename F> bool extCastCall(const LvlGenericHeader& header, F&& f) {
 }
 
 std::size_t structSize(VkStructureType type) {
-	LvlGenericHeader header {};
+	VkBaseInStructure header {};
 	header.sType = type;
 	std::size_t size = sizeof(header);
 
@@ -87,12 +87,12 @@ void patchChainElement(VkPipelineVertexInputDivisorStateCreateInfo& obj, const A
 }
 
 template<typename AllocFunc>
-LvlGenericModHeader* copyChainElement(const LvlGenericHeader& input, const AllocFunc& f) {
-	LvlGenericModHeader* ret {};
+VkBaseOutStructure* copyChainElement(const VkBaseInStructure& input, const AllocFunc& f) {
+	VkBaseOutStructure* ret {};
 	auto success = extCastCall(input, [&](auto& casted) {
 		auto& copied = copy(casted, f);
 		patchChainElement(copied, f);
-		ret = reinterpret_cast<LvlGenericModHeader*>(&copied);
+		ret = reinterpret_cast<VkBaseOutStructure*>(&copied);
 	});
 
 	dlg_assertm(success, "unknown stype {}", input.sType);
@@ -103,7 +103,7 @@ LvlGenericModHeader* copyChainElement(const LvlGenericHeader& input, const Alloc
 template<typename T>
 std::size_t patchAllocSize(const T& obj) {
 	std::size_t ret = 0u;
-	ThreadMemScope tms;
+	ThreadMemScope tms; // allocations discarded after this function, we just want the size
 	auto countFunc = [&](std::size_t size) {
 		ret += size;
 		return tms.allocBytes(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
@@ -115,7 +115,7 @@ std::size_t patchAllocSize(const T& obj) {
 }
 
 std::size_t structAndPatchSize(VkStructureType type) {
-	LvlGenericHeader header {};
+	VkBaseInStructure header {};
 	header.sType = type;
 	std::size_t size = 0u;
 
@@ -129,25 +129,28 @@ std::size_t structAndPatchSize(VkStructureType type) {
 	return size;
 }
 
-// AllocFunc: std::byte*(std::size_t size)
+// NOTE: this is the *one* central copying logic loop. All other functions
+// are just wrappers.
 template<typename AllocFunc>
-void* copyChain(const void* pNext, const AllocFunc& alloc) {
-	LvlGenericModHeader* last = nullptr;
+void* copyChain(const void* pNext, const AllocFunc& alloc, const ChainFunc& chainFunc) {
+	VkBaseOutStructure* last = nullptr;
 	void* ret = nullptr;
 	auto it = pNext;
 	while(it) {
-		auto* src = static_cast<const LvlGenericHeader*>(it);
+		auto* src = static_cast<const VkBaseInStructure*>(it);
 		auto* copied = copyChainElement(*src, alloc);
 
 		// copying can fail for unknown structs. They are just omitted.
 		if(copied) {
-			if(last) {
-				last->pNext = copied;
-			} else {
-				ret = copied;
-			}
+			if (!chainFunc || chainFunc(*copied)) {
+				if(last) {
+					last->pNext = copied;
+				} else {
+					ret = copied;
+				}
 
-			last = copied;
+				last = copied;
+			}
 		}
 
 		it = src->pNext;
@@ -156,7 +159,7 @@ void* copyChain(const void* pNext, const AllocFunc& alloc) {
 	return ret;
 }
 
-std::unique_ptr<std::byte[]> copyChain(const void* pNext) {
+std::unique_ptr<std::byte[]> copyChain(const void* pNext, const ChainFunc& chainFunc) {
 	if(!pNext) {
 		return {};
 	}
@@ -191,36 +194,36 @@ std::unique_ptr<std::byte[]> copyChain(const void* pNext) {
 		return ptr;
 	};
 
-	auto* ret = copyChain(pNext, allocFunc);
+	auto* ret = copyChain(pNext, allocFunc, chainFunc);
 	dlg_assert(ret == buf.get());
 	dlg_assertm(align(offset, __STDCPP_DEFAULT_NEW_ALIGNMENT__) == size,
 		"offset {}, size {}", offset, size);
 	return buf;
 }
 
-void* copyChainPatch(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
+void* copyChainReplace(const void*& pNext, std::unique_ptr<std::byte[]>& buf, const ChainFunc& chainFunc) {
 	if(!pNext) {
 		return nullptr;
 	}
 
-	buf = copyChainPatch(pNext);
-	return static_cast<void*>(buf.get());
+	buf = copyChainReplace(pNext, chainFunc);
+	return const_cast<void*>(pNext);
 }
 
-void* copyChainLocal(LinAllocScope& memScope, const void* pNext) {
+void* copyChainLocal(LinAllocScope& memScope, const void* pNext, const ChainFunc& chainFunc) {
 	auto allocFunc = [&](std::size_t size) {
 		return memScope.allocBytes(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 	};
 
-	return copyChain(pNext, allocFunc);
+	return copyChain(pNext, allocFunc, chainFunc);
 }
 
-void* copyChain(LinAllocator& allocator, const void* pNext) {
+void* copyChain(LinAllocator& allocator, const void* pNext, const ChainFunc& chainFunc) {
 	auto allocFunc = [&](std::size_t size) {
 		return allocator.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 	};
 
-	return copyChain(pNext, allocFunc);
+	return copyChain(pNext, allocFunc, chainFunc);
 }
 
 

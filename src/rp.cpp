@@ -735,7 +735,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 
 	rp.desc.flags = pCreateInfo->flags;
 	rp.desc.pNext = pCreateInfo->pNext;
-	rp.desc.exts.push_back(copyChainPatch(rp.desc.pNext));
+	rp.desc.exts.push_back(copyChainReplace(rp.desc.pNext));
 
 	// deep copy attachments & dependencies
 	upgrade(rp.desc.dependencies, pCreateInfo->pDependencies, pCreateInfo->dependencyCount);
@@ -835,18 +835,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	auto& rpi = *pCreateInfo;
 	rp.desc.flags = rpi.flags;
 	rp.desc.pNext = rpi.pNext;
-	rp.desc.exts.push_back(copyChainPatch(rp.desc.pNext));
+	rp.desc.exts.push_back(copyChainReplace(rp.desc.pNext));
 
 	rp.desc.attachments = {rpi.pAttachments, rpi.pAttachments + rpi.attachmentCount};
 	rp.desc.subpasses = {rpi.pSubpasses, rpi.pSubpasses + rpi.subpassCount};
 	rp.desc.dependencies = {rpi.pDependencies, rpi.pDependencies + rpi.dependencyCount};
 
 	for(auto& att : rp.desc.attachments) {
-		copyChainPatch(att.pNext, rp.desc.exts.emplace_back());
+		copyChainReplace(att.pNext, rp.desc.exts.emplace_back());
 	}
 
 	for(auto& dep : rp.desc.dependencies) {
-		copyChainPatch(dep.pNext, rp.desc.exts.emplace_back());
+		copyChainReplace(dep.pNext, rp.desc.exts.emplace_back());
 	}
 
 	auto addAtts = [&](const VkAttachmentReference2* refs, std::size_t count) {
@@ -861,7 +861,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	};
 
 	for(auto& subp : rp.desc.subpasses) {
-		copyChainPatch(subp.pNext, rp.desc.exts.emplace_back());
+		copyChainReplace(subp.pNext, rp.desc.exts.emplace_back());
 
 		auto& atts = rp.desc.attachmentRefs.emplace_back();
 		auto colorOff = addAtts(subp.pColorAttachments, subp.colorAttachmentCount);

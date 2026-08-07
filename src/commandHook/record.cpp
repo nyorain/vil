@@ -180,23 +180,31 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		hookClearAttachment;
 
 	this->shaderCapture = info.ops.shaderCapture;
-
-	auto preEnd = hcommand.end() - 1;
 	info.hookedSubpass = u32(-1);
 
-	for(auto it = hcommand.begin(); it != preEnd; ++it) {
+	for(auto it = hcommand.begin(); it != hcommand.end(); ++it) {
 		auto* cmd = *it;
+		const auto isLast = (it + 1 == hcommand.end());
 
 		auto category = cmd->category();
 		if(category == CommandCategory::beginRenderPass) {
-			info.beginRenderPassCmd = deriveCast<const BeginRenderPassCmd*>(cmd);
-		} else if(category == CommandCategory::renderSection) {
-			info.rpi = &deriveCast<const RenderSectionCommand*>(cmd)->rpi;
-
-			if(info.beginRenderPassCmd) {
-				info.hookedSubpass = deriveCast<const SubpassCmd*>(cmd)->subpassID;
+			auto* rpCmd = deriveCast<const BeginRenderPassCmd*>(cmd);
+			if (!isLast) {
+				info.beginRenderPassCmd = rpCmd;
 			} else {
-				info.beginRenderingCmd = deriveCast<const BeginRenderingCmd*>(cmd);
+				dlg_assertm(!info.rpi, "nested renderpass?");
+				auto& rpi = info.rpi.emplace();
+				rpi.colorAttachments = rpCmd->attachments;
+			}
+		} else if(category == CommandCategory::renderSection) {
+			info.rpi = deriveCast<const RenderSectionCommand*>(cmd)->rpi;
+
+			if (!isLast) {
+				if(info.beginRenderPassCmd) {
+					info.hookedSubpass = deriveCast<const SubpassCmd*>(cmd)->subpassID;
+				} else {
+					info.beginRenderingCmd = deriveCast<const BeginRenderingCmd*>(cmd);
+				}
 			}
 
 			break;
@@ -345,7 +353,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {
 	} else {
 		dlg_assertm(false,
 			"{} {} {} {}", info.splitRendering, info.beginRenderPassCmd,
-			info.beginRenderingCmd, info.rpi);
+			info.beginRenderingCmd, bool(info.rpi));
 	}
 }
 
@@ -411,7 +419,7 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 	} else {
 		dlg_assertm(false,
 			"{} {} {} {}", info.splitRendering, info.beginRenderPassCmd,
-			info.beginRenderingCmd, info.rpi);
+			info.beginRenderingCmd, bool(info.rpi));
 	}
 }
 
@@ -968,20 +976,20 @@ void CommandHookRecord::copyAttachment(const Command&, const RecordInfo& info,
 
 	// NOTE: written in a general way. We might be in a RenderPass
 	// or a {Begin, End}Rendering section (i.e. dynamicRendering).
-	const RenderPassInstanceState* rpi = info.rpi;
+	const RenderPassInstanceState& rpi = *info.rpi;
 	span<const ImageView* const> attachments;
 
 	switch(type) {
 		case AttachmentType::color:
 			// written like this since old GCC versions seem to have problems with
 			// our span conversion constructor.
-			attachments = {rpi->colorAttachments.data(), rpi->colorAttachments.size()};
+			attachments = {rpi.colorAttachments.data(), rpi.colorAttachments.size()};
 			break;
 		case AttachmentType::input:
-			attachments = {rpi->inputAttachments.data(), rpi->inputAttachments.size()};
+			attachments = {rpi.inputAttachments.data(), rpi.inputAttachments.size()};
 			break;
 		case AttachmentType::depthStencil:
-			attachments = {&rpi->depthStencilAttachment, 1u};
+			attachments = {&rpi.depthStencilAttachment, 1u};
 			break;
 	}
 
@@ -1008,6 +1016,9 @@ void CommandHookRecord::copyAttachment(const Command&, const RecordInfo& info,
 
 	auto& srcImg = *image;
 	VkImageLayout layout {};
+
+	// VUID-vkCmdPipelineBarrier-oldLayout-01181 guarantees that the layout
+	// of an attachment does not change during a render pass
 
 	if(info.beginRenderPassCmd && info.splitRendering) {
 		layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp

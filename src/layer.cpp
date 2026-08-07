@@ -12,7 +12,7 @@
 #include <pipe.hpp>
 #include <shader.hpp>
 #include <ds.hpp>
-#include <platform.hpp>
+#include <surface.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
@@ -481,7 +481,7 @@ VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(
 	auto* ini = findData<Instance>(phdev);
 	dlg_assert(ini);
 
-	constexpr auto filterExtensions = true;
+	const auto filterExtensions = checkEnvBinary("VIL_FILTER_EXTS", true);
 	if (!filterExtensions) {
 		return ini->dispatch.EnumerateDeviceExtensionProperties(phdev, pLayerName,
 			pPropertyCount, pProperties);
@@ -657,7 +657,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
 #ifdef VIL_WITH_WAYLAND
-	VIL_HOOK_EXT(CreateWaylandSurfaceKHR, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME),
+	VIL_INI_HOOK_EXT(CreateWaylandSurfaceKHR, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME),
 #endif // VIL_WITH_WAYLAND
 
 #ifdef VIL_WITH_X11

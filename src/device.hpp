@@ -156,6 +156,7 @@ struct Device {
 	VkSampler nearestSampler {};
 
 	std::unique_ptr<DisplayWindow> window;
+	std::unique_ptr<Overlay> overlay {};
 
 	// Always valid, initialized on device creation.
 	std::unique_ptr<CommandHook> commandHook {};
@@ -276,8 +277,8 @@ public:
 	Device(); // = default in src
 	~Device();
 
-	IntrusivePtr<Swapchain> swapchain();
-	IntrusivePtr<Swapchain> swapchainPtrLocked();
+	IntrusivePtr<Swapchain> lastSwapchain();
+	IntrusivePtr<Swapchain> lastSwapchainPtrLocked();
 
 	Swapchain* swapchainLocked() {
 		assertOwned(this->mutex);

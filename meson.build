@@ -107,6 +107,7 @@ endif
 with_win32 = build_machine.system() == 'windows'
 
 with_x11_hook = not with_win32 and get_option('x11-hook')
+with_wl_hook = not with_win32 and get_option('wl-hook')
 
 tracy_deps = []
 
@@ -190,7 +191,7 @@ src = files(
 	'src/data.cpp',
 	'src/api.cpp',
 	'src/overlay.cpp',
-	'src/platform.cpp',
+	'src/surface.cpp',
 	'src/lmm.cpp',
 	'src/fault.cpp',
 	'src/util/util.cpp',
@@ -277,7 +278,7 @@ src = files(
 	'src/ds.hpp',
 	'src/overlay.hpp',
 	'src/queue.hpp',
-	'src/platform.hpp',
+	'src/surface.hpp',
 	'src/win32.hpp',
 	'src/data.hpp',
 	'src/queryPool.hpp',
@@ -406,10 +407,10 @@ if with_window or with_x11_hook or with_win32 or with_example
 		deps += dep_swa
 		src += files(
 			'src/window.cpp',
-			'src/swaPlatform.cpp',
+			'src/swaOverlay.cpp',
 
 			'src/window.hpp',
-			'src/swaPlatform.hpp',
+			'src/swaOverlay.hpp',
 		)
 
 		layer_args += '-DVIL_WITH_SWA=1'
@@ -486,6 +487,14 @@ if with_x11_hook
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
 	args += ['-DVIL_WITH_X11']
+endif
+
+if with_wl_hook
+	src += files('src/wayland.cpp')
+	dep_wl_client = dependency('wayland-client', required: true)
+
+	deps += [dep_wl_client]
+	args += ['-DVIL_WITH_WAYLAND']
 endif
 
 if with_win32

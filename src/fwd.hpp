@@ -31,6 +31,7 @@ struct Device;
 struct Instance;
 struct Handle;
 struct DeviceHandle;
+struct Surface;
 struct Swapchain;
 struct Image;
 struct ImageView;
