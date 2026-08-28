@@ -199,18 +199,18 @@ void CommandHookSubmission::finish(Submission& subm) {
 				}
 
 				// NOTE: for xfb hints, we just always use vertexCountHint
-				changed |= max(hints.vertexCountHint, vertexCount);
+				changed |= imax(hints.vertexCountHint, vertexCount);
 			} else {
 				if(indexed) {
 					skip(span, sizeof(VkDrawIndexedIndirectCommand) * ops.vertexCmd);
 					auto cmd = read<VkDrawIndexedIndirectCommand>(span);
-					changed |= max(hints.indexCountHint, cmd.indexCount);
-					changed |= max(hints.instanceCountHint, cmd.instanceCount);
+					changed |= imax(hints.indexCountHint, cmd.indexCount);
+					changed |= imax(hints.instanceCountHint, cmd.instanceCount);
 				} else {
 					skip(span, sizeof(VkDrawIndirectCommand) * ops.vertexCmd);
 					auto cmd = read<VkDrawIndirectCommand>(span);
-					changed |= max(hints.vertexCountHint, cmd.vertexCount);
-					changed |= max(hints.instanceCountHint, cmd.instanceCount);
+					changed |= imax(hints.vertexCountHint, cmd.vertexCount);
+					changed |= imax(hints.instanceCountHint, cmd.instanceCount);
 				}
 			}
 

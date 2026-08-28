@@ -42,7 +42,7 @@ u32 findLSB(u32);
 u32 nextPOT(u32);
 
 template<typename T>
-bool max(T& val, const T& other) {
+bool imax(T& val, const T& other) {
 	if(other > val) {
 		val = other;
 		return true;
@@ -52,7 +52,7 @@ bool max(T& val, const T& other) {
 }
 
 template<typename T>
-bool min(T& val, const T& other) {
+bool imin(T& val, const T& other) {
 	if(other < val) {
 		val = other;
 		return true;

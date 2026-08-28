@@ -1569,6 +1569,8 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 			numIndices = fallbackIndexCountHint;
 		}
 
+		dlg_trace("indirect index copy: allocating space for {} indices", numIndices);
+
 		const auto indSize = indexSize(indexType);
 		state->indexBufCopy.ensure(dev, sizeof(Metadata) + numIndices * indSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -1675,8 +1677,13 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		directIndexedCopy(params);
 	} else if(auto* dcmd = commandCast<DrawIndirectCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
-		indirectCopy(dcmd->buffer, dcmd->offset,
-			nullptr, 0u, dcmd->drawCount, dcmd->stride);
+		if (dcmd->indexed) {
+			indirectIndexedCopy(dcmd->buffer, dcmd->offset,
+				nullptr, 0u, dcmd->drawCount, dcmd->stride);
+		} else {
+			indirectCopy(dcmd->buffer, dcmd->offset,
+				nullptr, 0u, dcmd->drawCount, dcmd->stride);
+		}
 	} else if(auto* dcmd = commandCast<DrawIndirectCountCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
 		if(dcmd->indexed) {

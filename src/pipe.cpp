@@ -105,9 +105,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		// transform feedback isn't supported for multiview graphics pipelines
 		// TODO: support it for non-multiview dynamic rendering
 		auto useXfb = dev.transformFeedback &&
-			pre.rp &&
-			!(flags2 & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) &&
-			!hasChain(pre.rp->desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
+			(!pre.rp || !hasChain(pre.rp->desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) &&
+			!(flags2 & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT);
 
 		auto& stages = stagesVecs.emplace_back();
 		for(auto s = 0u; s < nci.stageCount; ++s) {

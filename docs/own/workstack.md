@@ -1,3 +1,4 @@
+- [ ] add eye dome lighting to vertex viewer (optionally?)
 - [ ] fix VIL_ALLOW_UNSUPPORTED_EXTS to not filter out exts
 	- [ ] or add new var for this?
 - [ ] support shader debugging with spirv cross: spirv -> hlsl/glsl decompilation
