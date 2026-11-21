@@ -267,44 +267,35 @@ const QueueTypeImpl QueueTypeImpl::instance;
 const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
 const PipelineTypeImpl PipelineTypeImpl::instance;
 
-// TODO: replace with something like castCommandType?
+// alphabetical order
 static const ObjectTypeHandler* typeHandlers[] = {
-	nullptr, // unknown
-	nullptr, // instance
-	nullptr, // physical device
-	nullptr, // device
-	&QueueTypeImpl::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
-	nullptr, // pipeline cache
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
-	&PipelineTypeImpl::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
-	&DescriptorSetTypeImpl::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
-	// ...
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
-	// ...
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
-	// ...
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_EXT, ShaderObject, &Device::shaderObjects>::instance,
-	// ...
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
+	&DescriptorSetTypeImpl::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT, IndirectCommandsLayout, &Device::indirectCommandsLayouts>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_EXECUTION_SET_EXT, IndirectExecutionSet, &Device::indirectExecutionSets>::instance,
+	&PipelineTypeImpl::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_EXT, ShaderObject, &Device::shaderObjects>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	&QueueTypeImpl::instance,
 };
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;

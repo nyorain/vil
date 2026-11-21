@@ -41,7 +41,7 @@ urgent, bugs:
       {seems to be due to async compute present}
 	- [ ] also fix the semaphore crash. Run with debug output enabled.
 - [ ] figure out tracy crashes with doom eternal :(
-- [ ] fix with DLSS (doom)
+- [x] fix with DLSS (doom)
 
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
@@ -66,6 +66,8 @@ urgent, bugs:
 
 new, workstack:
 - [ ] better RT AccelStruct UI
+- [ ] extract type names and definitions from all shaders with debug info
+      then allow just using them in UI (e.g. buffer viewer)
 - [ ] integrate (latest) tracy via meson subproject
 	- [x] merge back mutex.inner
 - [ ] make optional dependencies optional (imgio)
