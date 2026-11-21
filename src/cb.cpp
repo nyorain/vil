@@ -23,6 +23,10 @@
 
 namespace vil {
 
+void record(CommandBuffer& cb, const Command& cmd) {
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+}
+
 // TODO: optionally(?) take a list of expected sTypes
 void* copyChain(CommandBuffer& cb, const void* pNext) {
 	dlg_assert(cb.builder().record_);
@@ -4423,7 +4427,39 @@ VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
 		}
 	}
 
-	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
+	record(cb, cmd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindSamplerHeapEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkBindHeapInfoEXT*                    pBindInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindSamplerHeapCmd>(cb);
+	cmd.info = *pBindInfo;
+	record(cb, cmd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindResourceHeapEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkBindHeapInfoEXT*                    pBindInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindResourceHeapCmd>(cb);
+	cmd.info = *pBindInfo;
+	record(cb, cmd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDataEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkPushDataInfoEXT*                    pPushDataInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<PushDataCmd>(cb);
+	cmd.info = *pPushDataInfo;
+
+	auto psrc = static_cast<const std::byte*>(cmd.info.data.address);
+	auto copied = copySpan(cb, psrc, cmd.info.data.size);
+	cmd.info.data.address = copied.data();
+
+	record(cb, cmd);
 }
 
 } // namespace vil

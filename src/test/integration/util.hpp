@@ -42,8 +42,8 @@ struct Setup {
 	u32 qfam;
 	u32 qfam2; // for queue2
 
-	VkLayerInstanceDispatchTable iniDispatch;
-	VkLayerDispatchTable dispatch;
+	VkuInstanceDispatchTable iniDispatch;
+	VkuDeviceDispatchTable dispatch;
 };
 
 struct TextureCreation {

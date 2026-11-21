@@ -2123,4 +2123,46 @@ VKAPI_ATTR void VKAPI_CALL GetDescriptorEXT(
 	dev.dispatch.GetDescriptorEXT(dev.handle, &info, dataSize, pDescriptor);
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL WriteSamplerDescriptorsEXT(
+		VkDevice                                    device,
+		uint32_t                                    samplerCount,
+		const VkSamplerCreateInfo*                  pSamplers,
+		const VkHostAddressRangeEXT*                pDescriptors) {
+	auto& dev = getDevice(device);
+	return dev.dispatch.WriteSamplerDescriptorsEXT(dev.handle,
+		samplerCount, pSamplers, pDescriptors);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL WriteResourceDescriptorsEXT(
+		VkDevice                                    device,
+		uint32_t                                    resourceCount,
+		const VkResourceDescriptorInfoEXT*          pResources,
+		const VkHostAddressRangeEXT*                pDescriptors) {
+	auto& dev = getDevice(device);
+	ThreadMemScope tms;
+	auto nres = tms.copy(pResources, resourceCount);
+	for (auto& res : nres) {
+		switch (res.type) {
+			case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+			case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
+			case VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM:
+			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: {
+				if (!res.data.pImage) continue;
+				if (!res.data.pImage->pView) continue;
+				if (!res.data.pImage->pView->image) continue;
+				auto& imgInfo = tms.copy(*res.data.pImage);
+				auto& viewInfo = tms.copy(*imgInfo.pView);
+				viewInfo.image = get(dev, viewInfo.image).handle;
+				imgInfo.pView = &viewInfo;
+				res.data.pImage = &imgInfo;
+			} default:
+				break;
+		}
+	}
+
+	return dev.dispatch.WriteResourceDescriptorsEXT(dev.handle,
+		nres.size(), nres.data(), pDescriptors);
+}
+
 } // namespace vil

@@ -42,9 +42,9 @@ extern "C" VIL_EXPORT int vil_runInternalIntegrationTests(
 	gSetup.qfam2 = gSetup.vilQueue2->family;
 	gSetup.outsideInstance = outsideInstance;
 
-	layer_init_device_dispatch_table(gSetup.dev,
+	vkuInitDeviceDispatchTable(gSetup.dev,
 		&gSetup.dispatch, &vil::GetDeviceProcAddr);
-	layer_init_instance_dispatch_table(gSetup.outsideInstance,
+	vkuInitInstanceDispatchTable(gSetup.outsideInstance,
 		&gSetup.iniDispatch, outsideGetInstanceProcAddr);
 
 	// Runn all integration tests

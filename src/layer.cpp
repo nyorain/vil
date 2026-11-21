@@ -395,7 +395,7 @@ VkResult doCreateInstance(
 	ini.vulkan11 = (finalApiVersion >= VK_API_VERSION_1_1);
 	ini.vulkan12 = (finalApiVersion >= VK_API_VERSION_1_2);
 
-	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
+	vkuInitInstanceDispatchTable(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
 	// find vkSetInstanceLoaderData callback
 	if(!standalone) {
@@ -1167,6 +1167,13 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetImageViewHandle64NVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
+
+	// VK_EXT_descriptor_heap
+	VIL_DEV_HOOK_EXT(CmdBindSamplerHeapEXT, VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBindResourceHeapEXT, VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdPushDataEXT, VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(WriteSamplerDescriptorsEXT, VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(WriteResourceDescriptorsEXT, VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME),
 }};
 
 #undef VIL_INI_HOOK

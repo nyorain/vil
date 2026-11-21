@@ -2468,6 +2468,18 @@ void CuLaunchKernelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 	dev.dispatch.CmdCuLaunchKernelNVX(cb, &launchInfo);
 }
 
+void BindSamplerHeapCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdBindSamplerHeapEXT(cb, &info);
+}
+
+void BindResourceHeapCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdBindResourceHeapEXT(cb, &info);
+}
+
+void PushDataCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dev.dispatch.CmdPushDataEXT(cb, &info);
+}
+
 // util
 bool isIndirect(const Command& cmd) {
 	return

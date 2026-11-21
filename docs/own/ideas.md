@@ -6,6 +6,29 @@ be possible or useful in the end.
 	  use tabs/collapsing headers
 	- Also allows to expose options to be changed on the fly
 
+- vk ext descriptor heap UI support
+	- basic support: add inspector showing the resources in the bound heap?
+	  But this can only work with type information from a shader
+	- for a given action command, we could patch the shaders to write
+	  all accessed offsets (with accessed types) into a buffer, atomically.
+	  Then, we can show the accessed associated resources in the UI.
+		- in WriteResourceDescriptorsEXT, we create a hashmap for all
+		  resources. Basically hashmap<descriptorBlob+type, VkResourceDescriptorInfoEXT>.
+		  That allows us to reconstruct the information then later on.
+		- ah ofc we also need to copy the descriptor heap before the command...
+		  the whole descriptor heap? uff
+		  Could copy lazily shader but that would require some form of
+		  deduplication?
+			- we might need that anyways, argh
+			- write into hashset from shader?
+			- otoh how many resources does an application really have?
+			  even if the heap is 50MB, it might be ok (but yeah kinda slow)
+			- problem with hashset: would require us to know size upfront.
+			  And might still have hash collisions.
+			  Might really slow down pipeline...
+			  But not sure if we can do better.
+			- We can use feedback to adapt hashset size over frames.
+
 - show custom pipeline stats in the resource viewer using
   https://registry.khronos.org/vulkan/specs/latest/man/html/VK_KHR_pipeline_executable_properties.html
 

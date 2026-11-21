@@ -207,6 +207,11 @@ struct LinAllocator {
 	}
 
 	template<typename T>
+	[[nodiscard]] T& copy(const T& src) {
+		return construct<T>(src);
+	}
+
+	template<typename T>
 	span<std::remove_const_t<T>> copy(T* data, size_t n) {
 		if(n == 0) {
 			return {};
@@ -312,6 +317,11 @@ struct LinAllocScope {
 		auto ret = this->allocUndef<std::remove_const_t<T>>(n);
 		std::memcpy(ret.data(), data, n * sizeof(T));
 		return ret;
+	}
+
+	template<typename T>
+	[[nodiscard]] T& copy(const T& src) {
+		return construct<T>(src);
 	}
 
 	// NOTE: prefer alloc, returning a span.

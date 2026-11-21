@@ -422,6 +422,26 @@ VKAPI_ATTR void VKAPI_CALL GetDescriptorEXT(
     size_t                                      dataSize,
     void*                                       pDescriptor);
 
+// VK_EXT_descriptor_heap
+VKAPI_ATTR VkResult VKAPI_CALL WriteSamplerDescriptorsEXT(
+    VkDevice                                    device,
+    uint32_t                                    samplerCount,
+    const VkSamplerCreateInfo*                  pSamplers,
+    const VkHostAddressRangeEXT*                pDescriptors);
+
+VKAPI_ATTR VkResult VKAPI_CALL WriteResourceDescriptorsEXT(
+    VkDevice                                    device,
+    uint32_t                                    resourceCount,
+    const VkResourceDescriptorInfoEXT*          pResources,
+    const VkHostAddressRangeEXT*                pDescriptors);
+
+// TODO
+// VKAPI_ATTR VkResult VKAPI_CALL vkGetImageOpaqueCaptureDataEXT(
+//     VkDevice                                    device,
+//     uint32_t                                    imageCount,
+//     const VkImage*                              pImages,
+//     VkHostAddressRangeEXT*                      pDatas);
+
 /*
 // TODO
 VKAPI_ATTR VkResult VKAPI_CALL GetBufferOpaqueCaptureDescriptorDataEXT(

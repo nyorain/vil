@@ -75,7 +75,7 @@ struct Device {
 	Instance* ini {};
 	VkDevice handle {};
 	VkPhysicalDevice phdev;
-	VkLayerDispatchTable dispatch;
+	VkuDeviceDispatchTable dispatch;
 
 	std::vector<std::string> appExts; // only extensions enabled by application
 	std::vector<std::string> allExts; // all extensions; also the ones enabled by us

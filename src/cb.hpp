@@ -1086,4 +1086,17 @@ VKAPI_ATTR void VKAPI_CALL CmdCuLaunchKernelNVX(
 	VkCommandBuffer commandBuffer,
 	const VkCuLaunchInfoNVX* pLaunchInfo);
 
+// VK_EXT_descriptor_heap
+VKAPI_ATTR void VKAPI_CALL CmdBindSamplerHeapEXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkBindHeapInfoEXT*                    pBindInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdBindResourceHeapEXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkBindHeapInfoEXT*                    pBindInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdPushDataEXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkPushDataInfoEXT*                    pPushDataInfo);
+
 } // namespace vil

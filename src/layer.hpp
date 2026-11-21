@@ -14,7 +14,7 @@ struct swa_display;
 namespace vil {
 
 struct Instance {
-	VkLayerInstanceDispatchTable dispatch;
+	VkuInstanceDispatchTable dispatch;
 	VkInstance handle {};
 	PFN_vkSetInstanceLoaderData setInstanceLoaderData {};
 

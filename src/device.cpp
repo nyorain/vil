@@ -863,7 +863,7 @@ VkResult doCreateDevice(
 	dev.windowWaitForSurface = checkEnvBinary("VIL_WAIT_SURFACE", false);
 	dev.hookRecordOnEnd = checkEnvBinary("VIL_CB_TEST_HOOK", true);
 
-	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
+	vkuInitDeviceDispatchTable(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 
 	// TODO: no idea exactly why this is needed. I guess they should not be
 	// part of the device loader table in the first place?

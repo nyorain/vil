@@ -187,6 +187,11 @@ enum class CommandType : u32 {
 	// VK_NVX_binary_import (dlss)
 	cuLaunchKernel,
 
+	// VK_EXT_descriptor_heap
+	bindSamplerHeap,
+	bindResourceHeap,
+	pushData,
+
 	count,
 };
 
@@ -1882,6 +1887,28 @@ struct CuLaunchKernelCmd final : CmdDerive<Command, CommandType::cuLaunchKernel>
 	Category category() const override { return Category::other; }
 };
 
+// VK_EXT_descriptor_heap
+struct BindSamplerHeapCmd final : CmdDerive<Command, CommandType::bindSamplerHeap> {
+	VkBindHeapInfoEXT info;
+	std::string_view nameDesc() const override { return "BindSamplerHeap"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct BindResourceHeapCmd final : CmdDerive<Command, CommandType::bindResourceHeap> {
+	VkBindHeapInfoEXT info;
+	std::string_view nameDesc() const override { return "BindResourceHeap"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
+struct PushDataCmd final : CmdDerive<Command, CommandType::pushData> {
+	VkPushDataInfoEXT info;
+	std::string_view nameDesc() const override { return "PushData"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	Category category() const override { return Category::bind; }
+};
+
 // F: overloaded function type of signature void(<Command Types>*)
 // Will call f with cmd casted to the type indicated by cmdType.
 // Can be used to implement the visitor pattern, as the overloaded function
@@ -2020,6 +2047,9 @@ auto castCommandType(CommandType cmdType, Command* cmd, F&& f) {
 	case CT::setDescriptorBufferOffsets: return f(static_cast<SetDescriptorBufferOffsetsCmd*>(cmd));
 	case CT::bindDescriptorBufferEmbeddedSamplers: return f(static_cast<BindDescriptorBufferEmbeddedSamplersCmd*>(cmd));
 	case CT::cuLaunchKernel: return f(static_cast<CuLaunchKernelCmd*>(cmd));
+	case CT::bindSamplerHeap: return f(static_cast<BindSamplerHeapCmd*>(cmd));
+	case CT::bindResourceHeap: return f(static_cast<BindResourceHeapCmd*>(cmd));
+	case CT::pushData: return f(static_cast<PushDataCmd*>(cmd));
 	case CT::count:
 		dlg_error("Invalid command type");
 	// NOTE: no default case by design so that we get compiler warnings about
