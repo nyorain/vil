@@ -166,12 +166,48 @@ void CommandRecordGui::draw(Draw& draw) {
 		ImGui::EndPopup();
 	}
 
+	// TEST
+	{
+		ImGui::SameLine();
+		if(ImGui::Button(ICON_FA_SAVE)) {
+			ImGui::OpenPopup("SaveSelection");
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Open save selection dialog");
+		}
+		if(ImGui::BeginPopup("SaveSelection")) {
+			showSavePopup();
+			ImGui::EndPopup();
+		}
+
+		ImGui::SameLine();
+		if(ImGui::Button(ICON_FA_FILE_ALT)) {
+			ImGui::OpenPopup("LoadSelection");
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Open load selection popup");
+		}
+		if(ImGui::BeginPopup("LoadSelection")) {
+			showLoadPopup();
+			ImGui::EndPopup();
+		}
+	}
+
+	ImGui::SameLine();
+	ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
 	ImGui::SameLine();
 
 	// TODO: don't show this (or set it to true and disable?)
 	//   when we are viewing an invalidated record without updating.
-	// auto updateInHook = toggleButton(ICON_FA_PAUSE, selector_.freezeState);
-	auto updateInHook = ImGui::Checkbox("Freeze State", &selector_.freezeState);
+	auto updateState = !selector_.freezeState;
+	auto updateInHook = toggleButton(ICON_FA_RETWEET, updateState);
+	selector_.freezeState = !updateState;
+
+	if(gui_->showHelp && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Continuously update state of the command you are viewing,\n"
+			"for instance, the image/buffer content and measured time.");
+	}
+
 	// NOTE: gui.cpp changes hook.freeze on window hide. So we need to
 	//   set it to false again if needed.
 	//   But we don't always update it, in case of new-selection,
@@ -182,23 +218,16 @@ void CommandRecordGui::draw(Draw& draw) {
 		hook.freeze.store(selector_.freezeState);
 	}
 
-	if(gui_->showHelp && ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
-			"e.g. the image/buffer content and measured time.\n"
-			"This does not affect updating of the commands shown on the left.");
-	}
-
 	if(selector_.updateMode() != UpdateMode::none) {
 		ImGui::SameLine();
-		// toggleButton(ICON_FA_LIST, freezeCommands_);
-		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
+		toggleButton(ICON_FA_LIST, updateCommands_);
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"This will freeze the commands shown on the left.\n"
-				"Useful to avoid flickering or just to inspect the current state.\n"
-				"Note that the per-command state you are viewing (e.g. image/buffer\n"
-				"content or measured time) will still be updated, use the 'Freeze State' checkbox");
+				"Continuously update list of submitted commands.\n"
+				"Disable to avoid flickering or just to inspect the current state.");
 		}
+	} else {
+		updateCommands_ = false;
 	}
 
 	// toggle button
@@ -231,33 +260,6 @@ void CommandRecordGui::draw(Draw& draw) {
 		}
 	}
 
-	// TODO: WIP test
-	{
-		ImGui::SameLine();
-		if(ImGui::Button(ICON_FA_SAVE)) {
-			ImGui::OpenPopup("SaveSelection");
-		}
-		if(gui_->showHelp && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Open save selection dialog");
-		}
-		if(ImGui::BeginPopup("SaveSelection")) {
-			showSavePopup();
-			ImGui::EndPopup();
-		}
-
-		ImGui::SameLine();
-		if(ImGui::Button(ICON_FA_FILE_ALT)) {
-			ImGui::OpenPopup("LoadSelection");
-		}
-		if(gui_->showHelp && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Open load selection popup");
-		}
-		if(ImGui::BeginPopup("LoadSelection")) {
-			showLoadPopup();
-			ImGui::EndPopup();
-		}
-	}
-
 	// == logical state update ==
 	auto doUpdate = updateTick_.tick();
 	if(doUpdate) {
@@ -268,7 +270,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			// until we find one.
 			updateTick_.activate();
 		} else {
-			if(!freezeCommands_) {
+			if(updateCommands_) {
 				updateFromSelector();
 			}
 
@@ -304,7 +306,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			}
 
 			// force update
-			if(!freezeCommands_) {
+			if(updateCommands_) {
 				updateRecords(std::move(lastFrame.batches), {}, {}, {});
 			}
 		}
@@ -1030,7 +1032,7 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	if(freezeOnSparseBind_) {
 		for(auto& subm : frame_) {
 			if(subm.type == SubmissionType::bindSparse) {
-				freezeCommands_ = true;
+				updateCommands_ = false;
 			}
 		}
 	}

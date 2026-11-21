@@ -77,7 +77,7 @@ private:
 private:
 	friend class Gui;
 	Gui* gui_ {};
-	bool freezeCommands_ {};
+	bool updateCommands_ {};
 	bool actionFullscreen_ {};
 
 	// = When in swapchain mode =
