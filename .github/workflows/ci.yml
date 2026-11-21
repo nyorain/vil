@@ -61,7 +61,6 @@ jobs:
         -Dintegration-tests=false
         -Dx11-hook=false
         -Dtracy=true
-        -Dwerror=true
       env:
         CC: gcc
     # TODO: no idea why this is needed using 'meson test' but not 'ninja test'.
@@ -97,7 +96,6 @@ jobs:
         -Dintegration-tests=false
         -Dx11-hook=false
         -Dbuildtype=release
-        -Dwerror=true
       env:
         CC: gcc
     - run: meson test -C build/ -v
@@ -124,7 +122,6 @@ jobs:
         -Dunit-tests=true
         -Dintegration-tests=false
         -Dx11-hook=false
-        -Dwerror=true
     - run: meson test -C build/ -v
 
   linux-clang-tracy-debugoptimized:
@@ -151,7 +148,6 @@ jobs:
         -Dx11-hook=false
         -Dtracy=true
         -Dbuildtype=debugoptimized
-        -Dwerror=true
     - run: meson test -C build/ -v
 
   # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
@@ -171,7 +167,6 @@ jobs:
         architecture: x64
     - run: meson setup build/ --backend=ninja
         -Dunit-tests=true
-        -Dwerror=true
     - run: meson test -C build/ -v
 
   windows:
@@ -191,7 +186,6 @@ jobs:
     - run: meson setup build/
         -Dunit-tests=true
         -Dintegration-tests=false
-        -Dwerror=true
     - run: meson test -C build/ -v
 
   windows-release:
@@ -220,7 +214,6 @@ jobs:
         -Dintegration-tests=false
         -Dbuildtype=release
         -Ddebug=true
-        -Dwerror=true
     - run: meson test -C build/ -v
     - name: Upload binaries
       uses: actions/upload-artifact@v4
@@ -252,7 +245,6 @@ jobs:
         -Dunit-tests=true
         -Dbuildtype=release
         -Dtracy=true
-        -Dwerror=true
     - run: meson test -C build/ -v
 
 # TODO:

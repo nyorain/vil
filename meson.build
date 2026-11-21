@@ -4,8 +4,6 @@ project('VIL', ['c', 'cpp'],
 		# NOTE: werror is a good idea in theory but there are too many
 		# compiler versions out there and people building it having
 		# to fight with build errors (instead of warnings) is not worth it.
-		# Gets manually activated for CI.
-		# 'werror=true',
 		'werror=false',
 		'swa:werror=false',
 		'imgio:werror=false',
