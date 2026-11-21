@@ -223,26 +223,25 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
 }
 
-void doAcquireImage(Swapchain& swapchain, VkSemaphore& vkSemaphore, VkFence& vkFence) {
-	auto& dev = *swapchain.dev;
+void addAcquireSignal(Swapchain& swapchain, Semaphore& semaphore) {
+	(void) swapchain;
+	dlg_assert(semaphore.type == VK_SEMAPHORE_TYPE_BINARY);
 
-	if(vkSemaphore) {
-		auto& semaphore = get(dev, vkSemaphore);
-		dlg_assert(semaphore.type == VK_SEMAPHORE_TYPE_BINARY);
-		dlg_assert(semaphore.signals.empty() ||
-			semaphore.signals.back()->counterpart ||
-			(semaphore.signals.back() == &SyncOp::swapchainAcquireDummy &&
-				!semaphore.waits.empty() &&
-				semaphore.waits.back()->counterpart == &SyncOp::swapchainAcquireDummy));
+	if (!semaphore.signals.empty() && !semaphore.signals.back()->counterpart) {
+		auto& lastSignal = semaphore.signals.back();
+		dlg_assertm(lastSignal == &SyncOp::swapchainAcquireDummy,
+			"sem: '{}', subm: {}, counterpart: {}",
+			semaphore.name,
+			bool(lastSignal->submission),
+			bool(lastSignal->counterpart));
 
-		semaphore.signals.push_back(&SyncOp::swapchainAcquireDummy);
-		vkSemaphore = semaphore.handle;
+		dlg_assertm(!semaphore.waits.empty(), "{}", semaphore.name);
+		if (!semaphore.waits.empty()) {
+			dlg_assert(semaphore.waits.back()->counterpart == &SyncOp::swapchainAcquireDummy);
+		}
 	}
 
-	if(vkFence) {
-		auto& fence = get(dev, vkFence);
-		vkFence = fence.handle;
-	}
+	semaphore.signals.push_back(&SyncOp::swapchainAcquireDummy);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2KHR(
@@ -254,10 +253,21 @@ VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2KHR(
 
 	auto cpy = *pAcquireInfo;
 	cpy.swapchain = swapchain.handle;
+	if (cpy.fence) cpy.fence = get(dev, cpy.fence).handle;
 
-	doAcquireImage(swapchain, cpy.semaphore, cpy.fence);
+	Semaphore* semaphore = nullptr;
+	if (cpy.semaphore) {
+		auto& semaphore = get(dev, cpy.semaphore);
+		cpy.semaphore = semaphore.handle;
+	}
 
-	return dev.dispatch.AcquireNextImage2KHR(device, &cpy, pImageIndex);
+	auto res = dev.dispatch.AcquireNextImage2KHR(device, &cpy, pImageIndex);
+	if (res < 0) {
+		return res;
+	}
+
+	if (semaphore) addAcquireSignal(swapchain, *semaphore);
+	return res;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImageKHR(
@@ -269,11 +279,22 @@ VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImageKHR(
 		uint32_t*                                   pImageIndex) {
 	auto& swapchain = get(device, vkSwapchain);
 	auto& dev = *swapchain.dev;
+	if (vkFence) vkFence = get(dev, vkFence).handle;
 
-	doAcquireImage(swapchain, vkSemaphore, vkFence);
+	Semaphore* semaphore = nullptr;
+	if (vkSemaphore) {
+		auto& semaphore = get(dev, vkSemaphore);
+		vkSemaphore = semaphore.handle;
+	}
 
-	return dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain.handle,
+	auto res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain.handle,
 		timeout, vkSemaphore, vkFence, pImageIndex);
+	if (res < 0) {
+		return res;
+	}
+
+	if (semaphore) addAcquireSignal(swapchain, *semaphore);
+	return res;
 }
 
 void swapchainPresent(Swapchain& swapchain) {
