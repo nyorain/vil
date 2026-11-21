@@ -28,6 +28,7 @@
 #include <gencmd.hpp>
 #include <util/util.hpp>
 #include <util/buffmt.hpp>
+#include <util/ext.hpp>
 #include <imgui/imgui_internal.h>
 #include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
@@ -1424,16 +1425,67 @@ void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
 	switch(pipe.type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
 			drawDescPipe(draw, static_cast<GraphicsPipeline&>(pipe));
-			return;
+			break;
 		case VK_PIPELINE_BIND_POINT_COMPUTE:
 			drawDescPipe(draw, static_cast<ComputePipeline&>(pipe));
-			return;
+			break;
 		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
 			drawDescPipe(draw, static_cast<RayTracingPipeline&>(pipe));
-			return;
+			break;
 		default:
 			dlg_warn("Unimplemented pipeline bind point");
-			return;
+			break;
+	}
+
+	auto& dev = gui_->dev();
+	if (dev.pipeProps) {
+		if (ImGui::TreeNode("PipelineExecutableProperties")) {
+			VkPipelineInfoKHR pipeInfo {};
+			pipeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR;
+			pipeInfo.pipeline = pipe.handle;
+			auto execProps = vkRetrieve(dev.dispatch.GetPipelineExecutablePropertiesKHR,
+				dev.handle, &pipeInfo);
+
+			for (auto&& [i, exec] : enumerate(execProps)) {
+				if (imGuiTreeNode("{}: {}", i, exec.name)) {
+					imGuiText("stages: {}", vk::nameShaderStageFlags(exec.stages));
+					imGuiText("description: {}", exec.description);
+					imGuiText("subgroupSize: {}", exec.subgroupSize);
+
+					ImGui::Separator();
+
+					VkPipelineExecutableInfoKHR execInfo {};
+					execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
+					execInfo.pipeline = pipe.handle;
+					execInfo.executableIndex = i;
+					auto stats = vkRetrieve(dev.dispatch.GetPipelineExecutableStatisticsKHR,
+						dev.handle, &execInfo);
+
+					for (auto&& [j, stat] : enumerate(stats)) {
+						std::string val = "?";
+						if (stat.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR) {
+							val = dlg::format("{}", stat.value.b32);
+						} else if (stat.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR) {
+							val = dlg::format("{}", stat.value.i64);
+						} else if (stat.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR) {
+							val = dlg::format("{}", stat.value.u64);
+						} else if (stat.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR) {
+							val = dlg::format("{}", stat.value.f64);
+						}
+
+						imGuiText("{}: {}", stat.name, val);
+						if (ImGui::IsItemHovered()) {
+							imGuiSetTooltip("{}", stat.description);
+						}
+					}
+
+					ImGui::TreePop();
+				}
+			}
+
+			ImGui::TreePop();
+		}
+
 	}
 }
 

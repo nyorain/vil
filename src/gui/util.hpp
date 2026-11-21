@@ -255,8 +255,7 @@ inline bool imGuiCheckbox(nytl::StringParam name, std::atomic<bool>& flag) {
 }
 
 // copied from ImGui::BeginPopup, but allows to pass ID
-inline bool imGuiBeginPopup(ImGuiID id, ImGuiWindowFlags flags = 0)
-{
+inline bool imGuiBeginPopup(ImGuiID id, ImGuiWindowFlags flags = 0) {
     ImGuiContext& g = *GImGui;
     if (g.OpenPopupStack.Size <= g.BeginPopupStack.Size) // Early out for performance
     {
@@ -265,6 +264,17 @@ inline bool imGuiBeginPopup(ImGuiID id, ImGuiWindowFlags flags = 0)
     }
     flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings;
     return ImGui::BeginPopupEx(id, flags);
+}
+
+template<typename... Args>
+bool imGuiTreeNode(const char* fmt, Args&&... args) {
+	return ImGui::TreeNode(dlg::format(fmt, std::forward<Args>(args)...).c_str());
+}
+
+template<class... Args>
+void imGuiSetTooltip(const char* fmt, Args&&... args) {
+	auto str = dlg::format(fmt, std::forward<Args>(args)...);
+	ImGui::SetTooltip("%s", str.c_str());
 }
 
 } // namesapce vil

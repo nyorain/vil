@@ -1088,3 +1088,8 @@ match rework 2, electric boogaloo
       the UsedHandle::commands vector are over-allocating *so much* currently,
 	  maybe replace them with linked lists (non-intrusive)?
 - [x] implement command group concept and last command buffer state viewing
+- [x] show custom pipeline stats in the resource viewer using
+  https://registry.khronos.org/vulkan/specs/latest/man/html/VK_KHR_pipeline_executable_properties.html
+- [x] fix with DLSS (doom)
+- [x] revisit timestamp queries. Shouldn't the first query be done
+      *before* the hooked cmd and not after??

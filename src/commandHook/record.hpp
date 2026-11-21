@@ -60,7 +60,6 @@ struct CommandHookRecord {
 	IntrusivePtr<ShaderCaptureHook> shaderCapture {}; // keep alive
 
 	IntrusivePtr<CommandHookState> state {};
-	OwnBuffer dummyBuf {};
 
 	// For capturing shader table from ray tracing shaders with patched
 	// shaders, we need to create a hooked shaderTable.
@@ -233,8 +232,8 @@ private:
 	static constexpr auto copyFullTransferBuffer = false;
 
 	// See node 1963
-	static constexpr auto timingBarrierBefore = true;
-	static constexpr auto timingBarrierAfter = true;
+	static constexpr auto timingBarrierBefore = false;
+	static constexpr auto timingBarrierAfter = false;
 };
 
 } // namespace vil

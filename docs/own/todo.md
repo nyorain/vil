@@ -41,7 +41,6 @@ urgent, bugs:
       {seems to be due to async compute present}
 	- [ ] also fix the semaphore crash. Run with debug output enabled.
 - [ ] figure out tracy crashes with doom eternal :(
-- [x] fix with DLSS (doom)
 
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
@@ -57,8 +56,6 @@ urgent, bugs:
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
 	      Make sure everything works.
 
-- [ ] revisit timestamp queries. Shouldn't the first query be done
-      *before* the hooked cmd and not after??
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       Increased it temporarily but should probably just roll own block sub-allocator

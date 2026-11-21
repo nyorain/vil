@@ -101,6 +101,7 @@ struct Device {
 	bool shaderStorageImageWriteWithoutFormat {};
 	bool shaderDrawParameters {};
 	bool extDeviceFault {}; // whether EXT_device_fault was enabled
+	bool pipeProps {};
 
 	// Only valid when EXT_device_address_binding_report enabled.
 	std::unique_ptr<DeviceAddressMap> addressMap;

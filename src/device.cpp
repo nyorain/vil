@@ -526,6 +526,7 @@ VkResult doCreateDevice(
 	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
 	auto enableDeviceFault = checkEnvBinary("VIL_DEVICE_FAULT", true);
+	auto enablePipeProps = checkEnvBinary("VIL_PIPELINE_PROPERTIES", true);
 
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage &&
 		fpPhdevFeatures2 && fpPhdevProps2 && (
@@ -553,6 +554,9 @@ VkResult doCreateDevice(
 		contains(ini.extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+	auto hasPipePropsApi = enablePipeProps &&
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		hasExt(supportedExts, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 
 	auto hasTimelineSemaphores = false;
 	auto hasTransformFeedback = false;
@@ -561,6 +565,7 @@ VkResult doCreateDevice(
 	bool hasStorage8 = false;
 	bool hasStorage16 = false;
 	bool hasDrawParams = false;
+	bool hasPipeProps = false;
 
 	// find generally relevant feature structs in chain
 	VkPhysicalDeviceVulkan11Features features11 {};
@@ -577,6 +582,7 @@ VkResult doCreateDevice(
 	VkPhysicalDevice16BitStorageFeatures* inStorage16 {};
 	VkPhysicalDevice8BitStorageFeatures* inStorage8 {};
 	VkPhysicalDeviceShaderDrawParametersFeatures* inDrawParams {};
+	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR* inPipeProps {};
 
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
@@ -607,6 +613,8 @@ VkResult doCreateDevice(
 			inStorage16 = reinterpret_cast<VkPhysicalDevice16BitStorageFeatures*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES) {
 			inDrawParams = reinterpret_cast<VkPhysicalDeviceShaderDrawParametersFeatures*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR) {
+			inPipeProps = reinterpret_cast<VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR*>(link);
 		}
 
 		link = (static_cast<VkBaseOutStructure*>(link->pNext));
@@ -619,6 +627,7 @@ VkResult doCreateDevice(
 	VkPhysicalDevice16BitStorageFeatures storage16Features {};
 	VkPhysicalDevice8BitStorageFeatures storage8Features {};
 	VkPhysicalDeviceShaderDrawParametersFeatures drawParamsFeatures {};
+	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipePropFeatures {};
 	if(fpPhdevFeatures2 && fpPhdevProps2) {
 		// query features support
 		VkPhysicalDeviceFeatures2 features2 {};
@@ -657,6 +666,11 @@ VkResult doCreateDevice(
 				abrFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT;
 				addChain(features2, abrFeatures);
 			}
+		}
+
+		if (hasPipePropsApi) {
+			pipePropFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR;
+			addChain(features2, pipePropFeatures);
 		}
 
 		fpPhdevFeatures2(phdev, &features2);
@@ -769,6 +783,20 @@ VkResult doCreateDevice(
 			}
 		}
 
+		if (pipePropFeatures.pipelineExecutableInfo) {
+			hasPipeProps = true;
+
+			if (inPipeProps) {
+				inPipeProps->pipelineExecutableInfo = true;
+			} else {
+				addChain(nci, pipePropFeatures);
+			}
+
+			// also need to enable extension
+			if(!hasExt(newExts, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
+				newExts.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+			}
+		}
 	}
 
 	// = Useful extensions =
@@ -838,6 +866,7 @@ VkResult doCreateDevice(
 	dev.storage8Bit = hasStorage8;
 	dev.storage16Bit = hasStorage16;
 	dev.shaderDrawParameters = hasDrawParams;
+	dev.pipeProps = hasPipeProps;
 
 	if(hasAddressBindingReport) {
 		dev.addressMap = std::make_unique<DeviceAddressMap>();

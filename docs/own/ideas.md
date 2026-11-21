@@ -29,9 +29,6 @@ be possible or useful in the end.
 			  But not sure if we can do better.
 			- We can use feedback to adapt hashset size over frames.
 
-- show custom pipeline stats in the resource viewer using
-  https://registry.khronos.org/vulkan/specs/latest/man/html/VK_KHR_pipeline_executable_properties.html
-
 - add mode where hooking is disabled. Commands can still be inspected
 	but, like, just statically.
 

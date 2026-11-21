@@ -3,6 +3,7 @@
 #include <vk/vulkan.h>
 #include <util/dlg.hpp>
 #include <util/linalloc.hpp>
+#include <nytl/functionTraits.hpp>
 #include <nytl/span.hpp>
 #include <vector>
 
@@ -95,6 +96,29 @@ void upgradeInto(std::vector<D>& dst, span<T> src) {
 template<typename D, typename T>
 void upgrade(std::vector<D>& dst, T* ptr, std::size_t count) {
 	upgradeInto(dst, span<T>(ptr, count));
+}
+
+// Assumes F to be a vkXXX function that retrieves an array
+template<typename T, typename F, typename... Args>
+auto vkRetrieveT(F func, Args&&... args) {
+	using FT = nytl::FunctionTraits<decltype(func)>;
+	using CountPtr = typename FT::template ArgType<FT::NumArgs - 2>;
+	using Count = std::remove_pointer_t<CountPtr>;
+
+	std::vector<T> ret;
+	Count count = 0u;
+	func(args..., &count, nullptr);
+	ret.resize(count);
+	func(args..., &count, ret.data());
+	return ret;
+}
+
+template<typename F, typename... Args>
+auto vkRetrieve(F func, Args&&... args) {
+	using FT = nytl::FunctionTraits<decltype(func)>;
+	using PT = typename FT::template ArgType<FT::NumArgs - 1>;
+	using T = std::remove_pointer_t<PT>;
+	return vkRetrieveT<T>(func, args...);
 }
 
 } // namespace vil

@@ -89,6 +89,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			nci.basePipelineHandle = basePipe.handle;
 		}
 
+		if (dev.pipeProps) {
+			nci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+		}
+
 		auto* flags2Info = findChainInfo<VkPipelineCreateFlags2CreateInfo,
 				VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO>(nci);
 		auto flags2 = flags2Info ? flags2Info->flags : u64(0u);
@@ -406,6 +410,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 			auto& basePipe = get(dev, nci.basePipelineHandle);
 			nci.basePipelineHandle = basePipe.handle;
 		}
+
+		if (dev.pipeProps) {
+			nci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+		}
 	}
 
 	{
@@ -701,6 +709,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		if(nci.basePipelineHandle) {
 			auto& basePipe = get(dev, nci.basePipelineHandle);
 			nci.basePipelineHandle = basePipe.handle;
+		}
+
+		if (dev.pipeProps) {
+			nci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 		}
 
 		if(nci.pLibraryInfo) {
