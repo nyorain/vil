@@ -59,7 +59,7 @@ private:
 	void drawDesc(Draw&, IndirectExecutionSet&);
 	void drawDesc(Draw&, IndirectCommandsLayout&);
 
-	void drawShaderInfo(VkPipeline, VkShaderStageFlagBits stage);
+	void drawShaderInfo(VkPipeline, PipelineShaderStage& stage);
 	void drawImageContents(Draw&, Image&, bool doSelect);
 	void showBufferViewer(Draw&, Buffer&);
 

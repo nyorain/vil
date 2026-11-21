@@ -889,10 +889,7 @@ void ResourceGui::drawDescPipe(Draw&, GraphicsPipeline& pipe) {
 	ImGui::Text("Stages");
 	for(auto& stage : pipe.stages) {
 		if(ImGui::TreeNode(&stage, "%s", vk::name(stage.stage))) {
-			ImGui::Text("Entry Point: %s", stage.entryPoint.c_str());
-			ImGui::Text("TODO");
-
-			drawShaderInfo(pipe.handle, stage.stage);
+			drawShaderInfo(pipe.handle, stage);
 
 			ImGui::TreePop();
 		}
@@ -904,8 +901,41 @@ void ResourceGui::drawDescPipe(Draw&, GraphicsPipeline& pipe) {
 
 // TODO: draw specialization info for stages
 
-void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
+void ResourceGui::drawShaderInfo(VkPipeline pipe, PipelineShaderStage& stage) {
 	auto& dev = gui_->dev();
+	imGuiText("Entry Point: {}", stage.entryPoint);
+
+	if (!stage.specialization.entries.empty()) {
+		if(ImGui::TreeNode("Specialization")) {
+			auto& dataVec = stage.specialization.data;
+			imGuiText("{} bytes", dataVec.size());
+			for (auto& entry : stage.specialization.entries) {
+				imGuiText("{}: offset {}, size {}",
+					entry.constantID, entry.offset, entry.size);
+				if (ImGui::IsItemHovered()) {
+					auto* data = dataVec.data();
+					dlg_assert(entry.offset + entry.size <= dataVec.size());
+					std::string str;
+					if (entry.size % 4 == 0u) {
+						for (auto i = 0u; i < entry.size / 4; ++i) {
+							u32 src;
+							std::memcpy(&src, data + entry.offset + 4 * i, 4u);
+							str += dlg::format("{}{} ", std::hex, src);
+						}
+					} else {
+						for (auto i = 0u; i < entry.size; ++i) {
+							u8 src;
+							std::memcpy(&src, data + entry.offset + i, 1u);
+							str += dlg::format("{}{} ", std::hex, src);
+						}
+					}
+
+					imGuiSetTooltip("{}", str);
+				}
+			}
+		}
+	}
+
 	if(contains(dev.allExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 		if(ImGui::TreeNode("AMD shader info")) {
@@ -913,7 +943,7 @@ void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
 			auto size = sizeof(info);
 
 			VK_CHECK(dev.dispatch.GetShaderInfoAMD(dev.handle, pipe,
-				stage, VK_SHADER_INFO_TYPE_STATISTICS_AMD,
+				stage.stage, VK_SHADER_INFO_TYPE_STATISTICS_AMD,
 				&size, &info));
 
 			// TODO: info.computeWorkGroupSize?
@@ -935,7 +965,7 @@ void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
 }
 
 void ResourceGui::drawDescPipe(Draw&, ComputePipeline& pipe) {
-	drawShaderInfo(pipe.handle, VK_SHADER_STAGE_COMPUTE_BIT);
+	drawShaderInfo(pipe.handle, pipe.stage);
 }
 
 void ResourceGui::drawDescPipe(Draw&, RayTracingPipeline& pipe) {
@@ -943,11 +973,10 @@ void ResourceGui::drawDescPipe(Draw&, RayTracingPipeline& pipe) {
 
 	if(ImGui::CollapsingHeader("Stages")) {
 		for(auto [i, stage] : enumerate(pipe.stages)) {
-			ImGui::PushID(i);
-
-			auto str = dlg::format("{}: {}", vk::name(stage.stage), stage.entryPoint);
-			ImGui::Text("%d: %s", int(i), str.c_str());
-			ImGui::PopID();
+			if(ImGui::TreeNode(&stage, "%s", vk::name(stage.stage))) {
+				drawShaderInfo(pipe.handle, stage);
+				ImGui::TreePop();
+			}
 		}
 	}
 
@@ -1341,7 +1370,6 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 }
 
 void ResourceGui::drawDesc(Draw&, Event& event) {
-	imGuiText("TODO");
 	(void) event;
 }
 
@@ -1356,11 +1384,11 @@ void ResourceGui::drawDesc(Draw&, Semaphore& semaphore) {
 }
 
 void ResourceGui::drawDesc(Draw&, Fence& fence) {
-	imGuiText("TODO");
 	(void) fence;
 
 	// TODO: display associated submission, if any
 }
+
 void ResourceGui::drawDesc(Draw&, BufferView& bufView) {
 	refButtonD(*gui_, bufView.buffer);
 	ImGui::SameLine();
@@ -1420,6 +1448,8 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 }
 
 void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
+	imGuiText("BindPoint: {}", vk::name(pipe.type));
+	imGuiText("CreateFlags: {}", vk::namePipelineCreateFlags(pipe.flags));
 	refButtonExpect(*gui_, pipe.layout.get());
 
 	switch(pipe.type) {

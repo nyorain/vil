@@ -233,7 +233,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		auto pipePtr = IntrusivePtr<GraphicsPipeline>(new GraphicsPipeline());
 		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
-		pipe.flags = pci.flags;
+		pipe.flags = pCreateInfos[i].flags;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
 		pipe.renderPass = std::move(pres[i].rp);

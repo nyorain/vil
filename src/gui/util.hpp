@@ -138,7 +138,7 @@ void refButtonOpt(Gui& gui, H* handle) {
 	}
 }
 
-// Asserts that image isn't null and if so, adds the button as with refButton.
+// Asserts that handle isn't null and if so, adds the button as with refButton.
 template<typename H>
 void refButtonExpect(Gui& gui, H* handle) {
 	dlg_assert_or(handle, return);
