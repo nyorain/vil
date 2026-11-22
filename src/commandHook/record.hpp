@@ -206,6 +206,7 @@ private:
 		const DescriptorCopyOp&, unsigned copyDstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
+	void resolvePushPointers(Command& bcmd, RecordInfo&);
 	void copyVertexInput(Command& bcmd, RecordInfo&);
 	void copyAttachment(const Command& bcmd, const RecordInfo&,
 		AttachmentType type, unsigned id,

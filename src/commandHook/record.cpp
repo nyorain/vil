@@ -6,7 +6,9 @@
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/fmt.hpp>
+#include <util/buffmt.hpp>
 #include <util/chain.hpp>
+#include <nytl/bytes.hpp>
 #include <device.hpp>
 #include <stats.hpp>
 #include <buffer.hpp>
@@ -19,6 +21,7 @@
 #include <rp.hpp>
 #include <ds.hpp>
 #include <vk/format_utils.h>
+#include <spirv_cross.hpp>
 #include <numeric>
 
 namespace vil {
@@ -928,6 +931,150 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	}
 }
 
+void CommandHookRecord::resolvePushPointers(Command& bcmd, RecordInfo& info) {
+	dlg_assert_or(isStateCmd(bcmd), return);
+	auto& cmd = static_cast<const StateCmdBase&>(bcmd);
+	auto found = false;
+	dlg_info("resolvePushPointers");
+
+	for(auto& stage : stages(*cmd.boundPipe())) {
+		if(stage.stage != info.ops.resolvePushPointers) {
+			continue;
+		}
+
+		found = true;
+		auto& compiled = specializeSpirv(stage);
+		auto resources = compiled.get_shader_resources();
+		if(resources.push_constant_buffers.empty()) {
+			dlg_warn("Error: No push constants in stage");
+			return;
+		}
+
+		dlg_assert(resources.push_constant_buffers.size() == 1u);
+		auto& pcr = resources.push_constant_buffers[0];
+		auto name = compiled.get_name(pcr.id);
+		if(name.empty()) {
+			name = compiled.get_name(pcr.base_type_id);
+			if(name.empty()) {
+				name = "?";
+			}
+		}
+
+		ThreadMemScope memScope;
+		auto* type = buildType(compiled, pcr.type_id, memScope.customUse());
+		dlg_assert_or(type, break);
+
+		auto pcdata = nytl::ReadBuf(cmd.boundPushConstants().data);
+
+		// TODO: better, recursive handling, not just top level
+		using PointerType = u64;
+		auto& dev = *record->dev;
+
+		// TODO: retrieve actual buf layout?
+		auto deref = *type;
+		deref.pointer = 0u;
+		auto size0 = size(deref, BufferLayout::std140);
+		dlg_assert(size0 == pcdata.size());
+
+		if (type->type == Type::BaseType::typeStruct) {
+			for (auto& member : type->members) {
+				if (member.type->pointer) {
+					auto deref = *member.type;
+					deref.pointer = 0u;
+					auto memberSize = size(deref, BufferLayout::std140);
+					auto baseSize = size0 + memberSize;
+					state->resolvedPushData.ensure(dev, baseSize,
+						VK_BUFFER_USAGE_TRANSFER_DST_BIT, {}, "PushConstantDeref");
+
+					auto wd = state->resolvedPushData.writeData();
+					write(wd, pcdata);
+
+					auto memberBytes = pcdata.subspan(member.offset);
+					auto address = nytl::read<PointerType>(memberBytes);
+					state->pushAddressMap[address] = pcdata.size();
+
+					for (auto i = 1u; i < type->pointer; ++i) {
+						// TODO
+						dlg_error("TODO");
+						return;
+					}
+
+					auto access = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+					VkMemoryBarrier memBarrier {};
+					memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+					memBarrier.srcAccessMask = access;
+					memBarrier.dstAccessMask = access;
+
+					dev.dispatch.CmdPipelineBarrier(cb,
+						VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+						VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+						0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+
+					VkBufferCopy copy {};
+					copy.srcOffset = 0u;
+					copy.dstOffset = pcdata.size();
+					copy.size = memberSize;
+
+					// TODO: use VK_KHR_copy_memory_indirect?
+					auto& srcBuf = bufferAtLocked(dev, address);
+					copy.srcOffset = address - srcBuf.deviceAddress;
+					dev.dispatch.CmdCopyBuffer(cb, srcBuf.handle,
+						state->resolvedPushData.buf, 1, &copy);
+					// TODO
+					break;
+				}
+			}
+		}
+
+		if (type->pointer) {
+			auto baseSize = sizeof(PointerType) + size0;
+			state->resolvedPushData.ensure(dev, baseSize,
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT, {}, "PushConstantDeref");
+
+			auto address = nytl::read<PointerType>(pcdata);
+			state->pushAddressMap[address] = sizeof(PointerType);
+
+			auto wd = state->resolvedPushData.writeData();
+			write(wd, address);
+
+			for (auto i = 1u; i < type->pointer; ++i) {
+				// TODO
+				dlg_error("TODO");
+				return;
+			}
+
+			auto access = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+			VkMemoryBarrier memBarrier {};
+			memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			memBarrier.srcAccessMask = access;
+			memBarrier.dstAccessMask = access;
+
+			dev.dispatch.CmdPipelineBarrier(cb,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+
+			VkBufferCopy copy {};
+			copy.srcOffset = 0u;
+			copy.dstOffset = sizeof(PointerType);
+			copy.size = baseSize;
+
+			// TODO: use VK_KHR_copy_memory_indirect?
+			auto& srcBuf = bufferAtLocked(dev, address);
+			copy.srcOffset = address - srcBuf.deviceAddress;
+			dev.dispatch.CmdCopyBuffer(cb, srcBuf.handle,
+				state->resolvedPushData.buf, 1, &copy);
+		}
+
+		break;
+	}
+
+	if(!found) {
+		dlg_warn("Push constants stage not found");
+		return;
+	}
+}
+
 void CommandHookRecord::copyAttachment(const Command&, const RecordInfo& info,
 		AttachmentType type, unsigned attID,
 		CommandHookState::CopiedAttachment& dst) {
@@ -1803,6 +1950,10 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			IntrusivePtr<DescriptorSetCow> tmpCow; // TODO: due to dsState removal
 			copyDs(bcmd, info, dc, i, state->copiedDescriptors[i], tmpCow);
 		}
+	}
+
+	if (info.ops.resolvePushPointers) {
+		resolvePushPointers(bcmd, info);
 	}
 
 	const bool isDraw = bcmd.category() == CommandCategory::draw;

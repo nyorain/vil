@@ -1260,7 +1260,14 @@ void CommandViewer::displayPushConstants() {
 
 		ThreadMemScope memScope;
 		auto* type = buildType(compiled, pcr.type_id, memScope.customUse());
-		displayTable(name.c_str(), *type, cmd->boundPushConstants().data);
+		auto hookState = selection().completedHookState();
+		if (hookState && hookState->resolvedPushData.buf) {
+			displayTable(name.c_str(), *type,
+				hookState->resolvedPushData.data(),
+				0u, &hookState->pushAddressMap);
+		} else {
+			displayTable(name.c_str(), *type, cmd->boundPushConstants().data);
+		}
 		break;
 	}
 
@@ -1787,7 +1794,8 @@ void CommandViewer::updateHook() {
 			}
 			break;
 		case IOView::pushConstants:
-			// nothing to copy here, we know them staically
+			// TODO: only set when there are pointers in the push data?
+			ops.resolvePushPointers = viewData_.pushConstants.stage;
 			break;
 		case IOView::shader:
 			shaderDebugger_.updateHooks(hook);

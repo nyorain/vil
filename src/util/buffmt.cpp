@@ -1,6 +1,7 @@
 #include <util/buffmt.hpp>
 #include <util/f16.hpp>
 #include <nytl/bytes.hpp>
+#include <nytl/scope.hpp>
 #include <gui/util.hpp>
 #include <gui/gui.hpp>
 #include <util/profiling.hpp>
@@ -34,13 +35,17 @@ FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width, 
 }
 
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
-		LinAllocator& alloc, const spc::Meta::Decoration* memberDeco) {
+		LinAllocator& alloc, const spc::Meta::Decoration* memberDeco,
+		bool ignoreFirstPointer = false) {
 
 	auto stype = &compiler.get_type(typeID);
 	if(stype->pointer) {
-		dlg_assert(stype->parent_type);
-		typeID = stype->parent_type;
-		stype = &compiler.get_type(typeID);
+		TODO: just ignoring this won't work! will be missing
+		decorations.
+
+		// dlg_assert(stype->parent_type);
+		// typeID = stype->parent_type;
+		// stype = &compiler.get_type(typeID);
 	}
 
 	auto& dst = alloc.construct<Type>();
@@ -60,6 +65,14 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		}
 		if(memberDeco->decoration_flags.get(spv::DecorationMatrixStride)) {
 			dst.deco.matrixStride = memberDeco->matrix_stride;
+		}
+	}
+
+	// handle pointer
+	if (stype->pointer) {
+		dst.pointer = stype->pointer_depth;
+		if (ignoreFirstPointer && dst.pointer) {
+			--dst.pointer;
 		}
 	}
 
@@ -167,7 +180,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		LinAllocator& alloc) {
-	return buildType(compiler, typeID, alloc, nullptr);
+	return buildType(compiler, typeID, alloc, nullptr, true);
 }
 
 FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset, u32 precision) {
@@ -309,7 +322,8 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 	displayAtomValue(type, data, offset);
 }
 
-void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
+void displayStruct(const char* baseName, const Type& type, ReadBuf data,
+		u32 offset, const std::unordered_map<u64, u32>* addressMapping) {
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 
@@ -329,23 +343,117 @@ void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 off
 				name = dlg::format("?{}", i);
 			}
 
-			display(name.c_str(), *member.type, data, offset + off);
+			display(name.c_str(), *member.type, data, offset + off,
+				addressMapping);
 		}
 
 		ImGui::TreePop();
 	}
 }
 
-void displayNonArray(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
+void displayNonArray(const char* baseName, const Type& type, ReadBuf data,
+		u32 offset, const std::unordered_map<u64, u32>* addressMapping) {
+	auto numPushes = 0u;
+	auto pushGuard = ScopeGuard([&]{
+		for (auto i = 0u; i < numPushes; ++i) {
+			ImGui::TreePop();
+		}
+	});
+	auto prefix = std::string("");
+	std::string newBaseName;
+
+	if (type.pointer) {
+		constexpr auto foldPointers = false;
+		if (foldPointers) {
+			for (auto i = 0u; i < type.pointer; ++i) {
+				using PointerType = u64;
+				if (offset + sizeof(PointerType) > data.size()) {
+					dlg_warn("Readinbg out-of-bounds: {}", offset);
+					return;
+				}
+
+				auto sdata = data.subspan(offset, sizeof(PointerType));
+				auto address = read<PointerType>(sdata);
+				if (address >= data.size()) {
+					dlg_warn("Pointer at offset {} has value {}, out of range (data.size() = {})",
+						offset, address, data.size());
+					return;
+				}
+
+				offset = address;
+			}
+		} else {
+			for (auto i = 0u; i < type.pointer; ++i) {
+				using PointerType = u64;
+				if (offset + sizeof(PointerType) > data.size()) {
+					dlg_warn("Readinbg out-of-bounds: {}", offset);
+					return;
+				}
+
+				auto sdata = data.subspan(offset, sizeof(PointerType));
+				auto address = read<PointerType>(sdata);
+
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+
+				ImGui::AlignTextToFramePadding();
+				if (!imGuiTreeNode("{}{}", prefix, baseName)) {
+					return;
+				}
+
+				ImGui::TableNextColumn();
+				imGuiText("{}0x{}", std::hex, address);
+
+				// TODO: could also link to buffer with that address?
+				// would require device. And know whether this function
+				// is called while locked.
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					auto deref = type;
+					deref.pointer -= (i + 1);
+					imGuiText("Type: {}", name(deref));
+					ImGui::EndTooltip();
+				}
+
+				prefix += "*";
+				++numPushes;
+
+				if (!addressMapping) {
+					dlg_warn("Pointer type but no address mapping");
+					return;
+				}
+
+				// TODO: how to resolve address?
+				auto it = addressMapping->find(address);
+				if (it == addressMapping->end()) {
+					dlg_warn("address {}{} not found in mapping", std::hex, address);
+					return;
+				}
+
+				offset = it->second;
+				if (offset >= data.size()) {
+					dlg_warn("Pointer at offset {} has value {}, out of range (data.size() = {})",
+						offset, address, data.size());
+					return;
+				}
+			}
+
+			if (!prefix.empty()) {
+				newBaseName = prefix + baseName;
+				baseName = newBaseName.c_str();
+			}
+		}
+	}
+
 	if(type.type == Type::typeStruct) {
-		displayStruct(baseName, type, data, offset);
+		displayStruct(baseName, type, data, offset, addressMapping);
 	} else {
 		displayAtom(baseName, type, data, offset);
 	}
 }
 
 void displayArrayDim(const char* baseName, const Type& type, span<const u32> rem,
-		ReadBuf data, u32 offset) {
+		ReadBuf data, u32 offset, const std::unordered_map<u64, u32>* addressMapping) {
 	auto count = rem[0];
 	rem = rem.subspan(1);
 
@@ -429,9 +537,9 @@ void displayArrayDim(const char* baseName, const Type& type, span<const u32> rem
 			auto newName = dlg::format("{}[{}]", baseName, i);
 			auto newOffset = offset + i * subSize;
 			if(rem.empty()) {
-				displayNonArray(newName.c_str(), type, data, newOffset);
+				displayNonArray(newName.c_str(), type, data, newOffset, addressMapping);
 			} else {
-				displayArrayDim(newName.c_str(), type, rem, data, newOffset);
+				displayArrayDim(newName.c_str(), type, rem, data, newOffset, addressMapping);
 			}
 		}
 
@@ -439,11 +547,12 @@ void displayArrayDim(const char* baseName, const Type& type, span<const u32> rem
 	}
 }
 
-void display(const char* name, const Type& type, ReadBuf data, u32 offset) {
+void display(const char* name, const Type& type, ReadBuf data, u32 offset,
+		const std::unordered_map<u64, u32>* addressMapping) {
 	ZoneScoped;
 
 	if(type.array.empty()) {
-		displayNonArray(name, type, data, offset);
+		displayNonArray(name, type, data, offset, addressMapping);
 		return;
 	}
 
@@ -454,10 +563,11 @@ void display(const char* name, const Type& type, ReadBuf data, u32 offset) {
 	span<u32> array = tms.copy(type.array);
 	std::reverse(array.begin(), array.end());
 
-	displayArrayDim(name, type, type.array, data, offset);
+	displayArrayDim(name, type, type.array, data, offset, addressMapping);
 }
 
-void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset) {
+void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset,
+		const std::unordered_map<u64, u32>* addressMapping) {
 	auto flags = ImGuiTableFlags_BordersInner |
 		ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_SizingStretchSame;
@@ -465,7 +575,7 @@ void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset) 
 		ImGui::TableSetupColumn(nullptr, 0, 0.25f);
 		ImGui::TableSetupColumn(nullptr, 0, 0.75f);
 
-		display(name, type, data, offset);
+		display(name, type, data, offset, addressMapping);
 		ImGui::EndTable();
 	}
 }
@@ -478,6 +588,10 @@ unsigned size(const Type& t, BufferLayout bl) {
 			arrayStride = alignPOT(arrayStride, 16u);
 		}
 		return arrayFac * t.deco.arrayStride;
+	}
+
+	if (t.pointer) {
+		return sizeof(u64);
 	}
 
 	switch(t.type) {
@@ -540,6 +654,20 @@ unsigned endAlign(const Type& t, BufferLayout bl) {
 	(void) bl;
 	(void) t;
 	return 1u;
+}
+
+std::string name(const Type& type) {
+	std::string ret = std::string(type.deco.name);
+	for(auto i = 0u; i < type.pointer; ++i) {
+		ret += '*';
+	}
+
+	for(auto dim : type.array) {
+		if (dim == 0u) ret += "[]";
+		else ret += dlg::format("[{}]", dim);
+	}
+
+	return ret;
 }
 
 } // namespace vil

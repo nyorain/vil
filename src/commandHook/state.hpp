@@ -95,6 +95,9 @@ struct CommandHookState {
 	// Set to u64(-1) on error.
 	u64 neededTime {u64(-1)};
 
+	OwnBuffer resolvedPushData {};
+	std::unordered_map<u64, u32> pushAddressMap {};
+
 	std::vector<CopiedDescriptor> copiedDescriptors;
 	std::vector<CopiedAttachment> copiedAttachments;
 

@@ -5,6 +5,7 @@
 #include <nytl/bytes.hpp>
 #include <nytl/flags.hpp>
 #include <optional>
+#include <unordered_map>
 #include <string_view>
 
 namespace vil {
@@ -50,11 +51,12 @@ struct Type {
 	};
 
 	BaseType type;
+	u32 width {};
 	u32 columns {1};
 	u32 vecsize {1};
+	u32 pointer {}; // pointer + array always means array of pointers
 	// Set to 0 for runtime array.
 	span<u32> array {};
-	u32 width {};
 
 	Decoration deco;
 
@@ -67,11 +69,15 @@ struct Type {
 	span<Member> members;
 };
 
+std::string name(const Type& type);
+
 static_assert(std::is_trivially_destructible_v<Type>);
 static_assert(std::is_trivially_destructible_v<Type::Member>);
 
-void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
-void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
+void display(const char* name, const Type& type, ReadBuf data,
+	u32 offset = 0u, const std::unordered_map<u64, u32>* addressMapping = {});
+void displayTable(const char* name, const Type& type, ReadBuf data,
+	u32 offset = 0u, const std::unordered_map<u64, u32>* addressMapping = {});
 
 // Display a single value from a non-struct type with imgui.
 void displayAtomValue(const Type& type, ReadBuf data, u32 offset);
@@ -94,7 +100,6 @@ unsigned size(const Type& t, BufferLayout bl);
 unsigned align(const Type& t, BufferLayout bl);
 unsigned endAlign(const Type& t, BufferLayout bl);
 
-// TODO: no correct pointer/self-reference support
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		LinAllocator& alloc);
 

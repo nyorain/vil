@@ -7,7 +7,9 @@ v0.3:
 - improve README, add more gifs/pics
 
 urgent, bugs:
-- [ ]image wayland.cpp: Fix todos in keyboardKey. Improve wayland.md docs.
+- [ ] push constants: aren't we relying on offset=0 when displaying them?
+	should buffmt.hpp:buildType read and store the offset?
+- [ ] image wayland.cpp: Fix todos in keyboardKey. Improve wayland.md docs.
 - [ ] pass pNext from QueuePresent to gui/overlay
 	- [ ] might need more filtering/patching
 - [ ] when loading unrelated serialized file (cmdsel),

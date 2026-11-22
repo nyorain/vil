@@ -2551,6 +2551,11 @@ void PushDataCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdPushDataEXT(cb, &info);
 }
 
+void PushDataCmd::displayInspector(Gui&) const {
+	imGuiText("Offset: {}", info.offset);
+	imGuiText("Size: {}", info.data.size);
+}
+
 // util
 bool isIndirect(const Command& cmd) {
 	return

@@ -75,6 +75,7 @@ struct CommandHookOps {
 	Vec3u32 shaderCaptureInput {}; // globalThreadID/vertexID/...
 
 	bool copyIndirectCmd {};
+	std::optional<VkShaderStageFlagBits> resolvePushPointers {};
 	std::vector<DescriptorCopyOp> descriptorCopies;
 	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
 	bool queryTime {};

@@ -54,7 +54,7 @@ struct Colon : pegtl::one<':'> {};
 struct Eof : pegtl::eof {};
 
 struct Identifier : pegtl::seq<pegtl::alpha, pegtl::star<pegtl::alnum>> {};
-struct Type : pegtl::seq<Identifier> {};
+struct Type : pegtl::seq<Identifier, pegtl::star<pegtl::one<'*'>>> {};
 struct Number : pegtl::plus<pegtl::digit> {};
 
 struct ArrayQualifierClose : pegtl::one<']'> {};
@@ -154,7 +154,7 @@ template<> struct selector<StructDecls> : Keep {};
 template<> struct selector<StructDecl> : Keep {};
 template<> struct selector<StructMemberList> : Keep {};
 template<> struct selector<ValueDecl> : Keep {};
-template<> struct selector<Type> : DiscardChildren {};
+template<> struct selector<Type> : Keep {};
 template<> struct selector<Seps> : Discard {};
 template<> struct selector<ArrayQualifier> : FoldDiscard {};
 template<> struct selector<ArrayRuntimeQualifier> : Keep {};
@@ -384,22 +384,46 @@ struct TreeParser {
 		}
 	}
 
-	Type* parseType(const ParseTreeNode& node) const {
-		checkType<syn::Type>(node);
-		auto name = node.string_view();
+	Type* parseBaseType(const ParseTreeNode& node) const {
+		checkType<syn::Identifier>(node);
+		auto baseName = node.string_view();
 
-		auto it = structs_.find(name);
+		auto it = structs_.find(baseName);
 		if(it != structs_.end()) {
 			return it->second;
 		}
 
-		auto t = parseBuiltin(name);
+		auto t = parseBuiltin(baseName);
 		if(t == nullptr) {
-			auto msg = dlg::format("Invalid type '{}'", name);
+			auto msg = dlg::format("Invalid type '{}'", baseName);
 			throw SemanticError(node, msg);
 		}
 
 		return t;
+	}
+
+	Type* parseType(const ParseTreeNode& node) const {
+		checkType<syn::Type>(node);
+
+		if (node.children.empty() || !node.children[0]) {
+			auto msg = dlg::format("Unexpected type");
+			throw InternalError(node, msg);
+		}
+
+		auto* type = parseBaseType(*node.children[0]);
+		if (node.children.size() > 1) {
+			for(auto& child : node.children) {
+				if (!child || child->string_view() != "*") {
+					auto msg = dlg::format("Expected pointer, got {}", child->string_view());
+					throw InternalError(node, msg);
+				}
+			}
+
+			type = &alloc_.construct<Type>(*type);
+			type->pointer = node.children.size() - 1;
+		}
+
+		return type;
 	}
 
 	Type* applyArrayQualifiers(const ParseTreeNode& quals, const Type& in) {
