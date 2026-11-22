@@ -187,8 +187,9 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
 		auto& bds = state.descriptorSets[i];
-		if(!bds.dsPool && bds.layout) {
-			dlg_assert(!bds.dsEntry);
+		if(!bds.pool && bds.layout) {
+			dlg_assert(!bds.entry);
+			dlg_assert(!state.pipe || state.pipe->layout);
 
 			// NOTE: we only need this since we don't track this during recording
 			// anymore at the moment.
@@ -222,13 +223,13 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 }
 
 std::pair<DescriptorSet*, std::unique_lock<decltype(DescriptorPool::mutex)>>
-tryAccess(const BoundDescriptorSet& bds) {
-	if(!bds.layout) {
+tryAccess(const DescriptorSetRef& bds) {
+	if(!bds.entry) {
 		dlg_debug("DescriptorSet never bound");
 		return {};
 	}
 
-	if(!bds.dsPool) {
+	if(!bds.pool) {
 		dlg_warn("Push Descriptor?");
 		return {};
 	}
@@ -238,16 +239,16 @@ tryAccess(const BoundDescriptorSet& bds) {
 	// always adds it to its used handles and thus keeps it alive.
 	// assertOwned(bds.dsPool->dev->mutex);
 
-	auto lock = std::unique_lock(bds.dsPool->mutex);
+	auto lock = std::unique_lock(bds.pool->mutex);
 
-	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
+	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.entry);
 	if(!entry.set) {
 		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed");
 		return {};
 	}
 
 	auto& ds = *entry.set;
-	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
+	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.pool->data.get() < bds.pool->dataSize);
 	if(ds.id != bds.dsID) {
 		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed (overwritten)");
 		return {};
@@ -268,8 +269,8 @@ tryAccessState(const DescriptorState& state, u32 setID) {
 
 	auto& setLayout = bds.layout->descriptors[setID];
 
-	dlg_assert_or(!!bds.dsPool == !!bds.dsEntry, return {});
-	if (!bds.dsEntry) {
+	dlg_assert_or(!!bds.pool == !!bds.entry, return {});
+	if (!bds.entry) {
 		dlg_assert(setLayout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
 		DescriptorStateRef ref;
 		ref.data = bds.pushDescriptors.data();
@@ -286,14 +287,14 @@ tryAccessState(const DescriptorState& state, u32 setID) {
 	return {DescriptorStateRef(*ds), std::move(lock)};
 }
 
-DescriptorSet& access(const BoundDescriptorSet& bds) {
-	dlg_assert(bds.dsPool);
+DescriptorSet& access(const DescriptorSetRef& bds) {
+	dlg_assert(bds.pool);
 
-	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
+	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.entry);
 	dlg_assert(entry.set);
 
 	auto& ds = *entry.set;
-	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
+	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.pool->data.get() < bds.pool->dataSize);
 	dlg_assert(ds.id == bds.dsID);
 
 	return ds;
@@ -321,7 +322,7 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
 		auto [ds, lock] = tryAccess(bds);
 		if(ds) {
-			ret.states.emplace(bds.dsEntry, ds->addCowLocked());
+			ret.states.emplace(bds.entry, ds->addCowLocked());
 		}
 	}
 
@@ -336,13 +337,13 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsValidLocked(const Command& 
 	}
 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
-		if (!bds.dsEntry) {
+		if (!bds.entry) {
 			continue; // push descriptor or not bound
 		}
 
 		auto& ds = access(bds);
 		std::lock_guard lock(ds.pool->mutex);
-		ret.states.emplace(bds.dsEntry, ds.addCowLocked());
+		ret.states.emplace(bds.entry, ds.addCowLocked());
 	}
 
 	return ret;
@@ -378,7 +379,7 @@ std::vector<const Command*> findHierarchy(const CommandRecord& rec, const Comman
 	return ret;
 }
 
-CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
+UsedHandles::UsedHandles(LinAllocator& alloc) :
 		buffers(alloc),
 		graphicsPipes(alloc),
 		computePipes(alloc),
@@ -430,7 +431,7 @@ std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> accessSet(
 	dlg_assert(set < boundSet.layout->descriptors.size());
 	auto& setLayout = boundSet.layout->descriptors[set];
 
-	if (!boundSet.dsEntry) {
+	if (!boundSet.entry) {
 		dlg_assert(setLayout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
 		DescriptorStateRef ref;
 		ref.data = boundSet.pushDescriptors.data();
@@ -439,7 +440,7 @@ std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> accessSet(
 		return {ref, std::unique_lock<DebugMutex>{}};
 	}
 
-	auto stateIt = snapshot.states.find(boundSet.dsEntry);
+	auto stateIt = snapshot.states.find(boundSet.entry);
 	if(stateIt == snapshot.states.end()) {
 		// not 100% sure how this can happen
 		dlg_error("uncaptured set");

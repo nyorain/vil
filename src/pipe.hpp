@@ -55,6 +55,7 @@ struct Pipeline : SharedDeviceHandle {
 	// Could separate handle and description into separate
 	// shared-owned objects? On the other hand, shouldn't hurt to keep the
 	// handle alive here either, should be cheap.
+	// NOTE: optional with EXT_descriptor_heap
 	IntrusivePtr<PipelineLayout> layout {};
 
 protected:

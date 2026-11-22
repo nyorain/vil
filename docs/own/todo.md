@@ -7,7 +7,7 @@ v0.3:
 - improve README, add more gifs/pics
 
 urgent, bugs:
-- [ ] wayland.cpp: Fix todos in keyboardKey. Improve wayland.md docs.
+- [ ]image wayland.cpp: Fix todos in keyboardKey. Improve wayland.md docs.
 - [ ] pass pNext from QueuePresent to gui/overlay
 	- [ ] might need more filtering/patching
 - [ ] when loading unrelated serialized file (cmdsel),

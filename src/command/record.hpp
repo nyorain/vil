@@ -28,21 +28,7 @@ struct PushConstantData {
 	span<std::byte> data; // full data
 };
 
-struct BoundDescriptorSet {
-	// At record time, this points to the DescriptorPoolSetEntry object.
-	// Since the descriptor set might get invalid later on, this
-	// should not be accessed directly, unless we know for certain
-	// that the descriptorSet must be valid, e.g. at submission time.
-	// See CommandDescriptorSnapshot that maps these pointers
-	// to the DescriptorState at submission time.
-	// Unlike other handles, we don't keep DescriptorSet handles alive.
-	// To detect whether the pointer is still valid outside of submission
-	// time (e.g. when a new record is selected in the gui), we store
-	// the pool and the dsID here.
-	void* dsEntry {};
-	DescriptorPool* dsPool {};
-	u32 dsID {};
-
+struct BoundDescriptorSet : DescriptorSetRef {
 	// For normal descriptor sets, dynamicOffsets is active (but potentially empty).
 	// For push descriptors, 'pushDescriptors' holds the data, just as
 	//   descriptor data is stored in a descriptor set. For push descriptor sets,
@@ -184,11 +170,14 @@ constexpr struct ManualTag {} manualTag;
 // Links a 'DeviceHandle' to a 'CommandRecord'.
 template<typename T>
 struct RefHandle {
-	explicit RefHandle(LinAllocator& alloc) noexcept /*: commands(alloc)*/ { (void) alloc; }
+	explicit RefHandle(LinAllocator& alloc) noexcept : commands(alloc) { (void) alloc; }
 
 	// List of commands where the associated handle is used inside the
 	// associated record.
-	// CommandAllocList<Command*> commands;
+	CommandAllocList<Command*> commands;
+
+	// We use an IntrusivePtr here, keeping the handle alive while the
+	// record is alive
 	IntrusivePtr<T> handle;
 };
 
@@ -207,20 +196,17 @@ struct UsedImage : RefHandle<Image> {
 	CommandAllocVector<ImageSubresourceLayout> layoutChanges;
 };
 
-struct UsedDescriptorSet {
-	explicit UsedDescriptorSet(LinAllocator& alloc) noexcept /*: commands(alloc)*/ { (void) alloc; }
-
-	// Must not access directly, might have been destroyed.
-	void* ds {};
-	// CommandAllocList<Command*> commands; // the BindDescriptorSets commands
+struct UsedDescriptorSet : public DescriptorSetRef {
+	explicit UsedDescriptorSet(LinAllocator& alloc) noexcept : commands(alloc) { (void) alloc; }
+	CommandAllocList<Command*> commands; // the BindDescriptorSets commands
 };
 
 inline bool operator==(const UsedDescriptorSet& a, const UsedDescriptorSet& b) {
-	return a.ds == b.ds;
+	return a.entry == b.entry && a.dsID == b.dsID && a.pool == b.pool;
 }
 
 inline bool operator!=(const UsedDescriptorSet& a, const UsedDescriptorSet& b) {
-	return a.ds != b.ds;
+	return a.entry != b.entry || a.dsID != b.dsID || a.pool != b.pool;
 }
 
 struct RefHandleHash {
@@ -233,7 +219,9 @@ struct RefHandleHash {
 
 struct UsedDescriptorHash {
 	size_t operator()(const UsedDescriptorSet& x) const {
-		return std::hash<void*>{}(x.ds);
+		// should be enough, should never have the same entry
+		// with different pools or ids in same hashSet
+		return std::hash<void*>{}(x.entry);
 	}
 };
 
@@ -241,7 +229,7 @@ template<typename T>
 using UsedHandleSet = CommandAllocHashSet<RefHandle<T>, RefHandleHash>;
 
 template<typename K>
-auto find(UsedHandleSet<K>& used, K& elem) {
+auto findUsed(UsedHandleSet<K>& used, K& elem) {
 	// TODO: better, transparent find with c++20
 	RefHandle<K> rh(ThreadContext::instance.linalloc_);
 	rh.handle = IntrusivePtr<K>(acquireOwnership, &elem);
@@ -252,7 +240,7 @@ auto find(UsedHandleSet<K>& used, K& elem) {
 
 // TODO: kinda hacky, only a template so we don't have to include stuff
 template<typename Image>
-auto find(CommandAllocHashSet<UsedImage, RefHandleHash>& used, Image& elem) {
+auto findUsed(CommandAllocHashSet<UsedImage, RefHandleHash>& used, Image& elem) {
 	// TODO: better, transparent find with c++20
 	UsedImage rh(ThreadContext::instance.linalloc_);
 	rh.handle = IntrusivePtr<Image>(acquireOwnership, &elem);
@@ -261,20 +249,62 @@ auto find(CommandAllocHashSet<UsedImage, RefHandleHash>& used, Image& elem) {
 	return it;
 }
 
-// TODO: kinda hacky, only a template so we don't have to include stuff
-template<typename DescriptorSet>
-inline auto find(CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash>& used,
-		DescriptorSet& ds) {
+inline auto findUsed(CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash>& used,
+		const DescriptorSetRef& ds) {
 	// TODO: better, transparent find with c++20
 	UsedDescriptorSet rh(ThreadContext::instance.linalloc_);
-	rh.ds = &ds;
+	rh.entry = ds.entry;
+	rh.pool = ds.pool;
+	rh.dsID = ds.dsID;
 	auto it = used.find(rh);
 	return it;
+}
+
+// TODO: kinda hacky, only a template so we don't have to include stuff
+template<typename DescriptorSet>
+inline auto findUsed(CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash>& used,
+		const DescriptorSet& ds) {
+	DescriptorSetRef dsRef;
+	dsRef.entry = ds.setEntry;
+	dsRef.dsID = ds.id;
+	dsRef.pool = ds.pool;
+	return findUsed(used, dsRef);
 }
 
 struct AccelStructCopy {
 	AccelStruct* src;
 	AccelStruct* dst;
+};
+
+struct UsedHandles {
+	// NOTE: change this when adding maps here!
+	// Important for CmdExecuteCommands impl assert
+	static constexpr auto handleTypeCount = 20u;
+
+	UsedHandleSet<Buffer> buffers;
+	UsedHandleSet<GraphicsPipeline> graphicsPipes;
+	UsedHandleSet<ComputePipeline> computePipes;
+	UsedHandleSet<RayTracingPipeline> rtPipes;
+	UsedHandleSet<PipelineLayout> pipeLayouts;
+	UsedHandleSet<DescriptorUpdateTemplate> dsuTemplates;
+	UsedHandleSet<RenderPass> renderPasses;
+	UsedHandleSet<Framebuffer> framebuffers;
+	UsedHandleSet<QueryPool> queryPools;
+	UsedHandleSet<ImageView> imageViews;
+	UsedHandleSet<BufferView> bufferViews;
+	UsedHandleSet<Sampler> samplers;
+	UsedHandleSet<AccelStruct> accelStructs;
+	UsedHandleSet<Event> events;
+	UsedHandleSet<DescriptorPool> dsPools;
+
+	UsedHandleSet<ShaderObject> shaderObjects;
+	UsedHandleSet<IndirectCommandsLayout> indirectCommandLayouts;
+	UsedHandleSet<IndirectExecutionSet> indirectExecutionSets;
+
+	CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
+	CommandAllocHashSet<UsedImage, RefHandleHash> images;
+
+	UsedHandles(LinAllocator& alloc);
 };
 
 // Represents the recorded state of a command buffer.
@@ -322,37 +352,7 @@ struct CommandRecord {
 	CommandAllocList<const char*> pushLables;
 
 	CommandAllocList<AccelStructCopy> accelStructCopies;
-
-	struct UsedHandles {
-		// NOTE: change this when adding maps here!
-		// Important for CmdExecuteCommands impl assert
-		static constexpr auto handleTypeCount = 17u;
-
-		UsedHandleSet<Buffer> buffers;
-		UsedHandleSet<GraphicsPipeline> graphicsPipes;
-		UsedHandleSet<ComputePipeline> computePipes;
-		UsedHandleSet<RayTracingPipeline> rtPipes;
-		UsedHandleSet<PipelineLayout> pipeLayouts;
-		UsedHandleSet<DescriptorUpdateTemplate> dsuTemplates;
-		UsedHandleSet<RenderPass> renderPasses;
-		UsedHandleSet<Framebuffer> framebuffers;
-		UsedHandleSet<QueryPool> queryPools;
-		UsedHandleSet<ImageView> imageViews;
-		UsedHandleSet<BufferView> bufferViews;
-		UsedHandleSet<Sampler> samplers;
-		UsedHandleSet<AccelStruct> accelStructs;
-		UsedHandleSet<Event> events;
-		UsedHandleSet<DescriptorPool> dsPools;
-
-		UsedHandleSet<ShaderObject> shaderObjects;
-		UsedHandleSet<IndirectCommandsLayout> indirectCommandLayouts;
-		UsedHandleSet<IndirectExecutionSet> indirectExecutionSets;
-
-		CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
-		CommandAllocHashSet<UsedImage, RefHandleHash> images;
-
-		UsedHandles(LinAllocator& alloc);
-	} used;
+	UsedHandles used;
 
 	// We have to keep the secondary records (via cmdExecuteCommands) alive
 	// since the command buffers can be reused by the application and
@@ -381,6 +381,29 @@ struct CommandRecord {
 	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
 
+struct GetUsedSet {
+	static auto& get(CommandRecord& rec, const Image&) { return rec.used.images; }
+	static auto& get(CommandRecord& rec, const Buffer&) { return rec.used.buffers; }
+	static auto& get(CommandRecord& rec, const ImageView&) { return rec.used.imageViews; }
+	static auto& get(CommandRecord& rec, const BufferView&) { return rec.used.bufferViews; }
+	static auto& get(CommandRecord& rec, const Sampler&) { return rec.used.samplers; }
+	static auto& get(CommandRecord& rec, const Event&) { return rec.used.events; }
+	static auto& get(CommandRecord& rec, const PipelineLayout&) { return rec.used.pipeLayouts; }
+	static auto& get(CommandRecord& rec, const DescriptorUpdateTemplate&) { return rec.used.dsuTemplates; }
+	static auto& get(CommandRecord& rec, const RenderPass&) { return rec.used.renderPasses; }
+	static auto& get(CommandRecord& rec, const Framebuffer&) { return rec.used.framebuffers; }
+	static auto& get(CommandRecord& rec, const QueryPool&) { return rec.used.queryPools; }
+	static auto& get(CommandRecord& rec, const AccelStruct&) { return rec.used.accelStructs; }
+	static auto& get(CommandRecord& rec, const GraphicsPipeline&) { return rec.used.graphicsPipes; }
+	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
+	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
+	static auto& get(CommandRecord& rec, const DescriptorPool&) { return rec.used.dsPools; }
+
+	static auto& get(CommandRecord& rec, const ShaderObject&) { return rec.used.shaderObjects; }
+	static auto& get(CommandRecord& rec, const IndirectCommandsLayout&) { return rec.used.indirectCommandLayouts; }
+	static auto& get(CommandRecord& rec, const IndirectExecutionSet&) { return rec.used.indirectExecutionSets; }
+};
+
 void clearHookRecordsLocked(CommandRecord& record);
 
 // Checks if the given bound DescriptorSet is still valid.
@@ -388,7 +411,7 @@ void clearHookRecordsLocked(CommandRecord& record);
 // NOTE: returns nullptr for push descriptors.
 [[nodiscard]]
 std::pair<DescriptorSet*, std::unique_lock<LockableBase(DebugMutex)>>
-tryAccess(const BoundDescriptorSet&);
+tryAccess(const DescriptorSetRef&);
 
 // Like tryAccess but returns a ref to the state, also works for
 // push descriptors.
@@ -401,7 +424,7 @@ tryAccessState(const DescriptorState&, u32 setID);
 // the validity of the BoundDescriptorSet is guaranteed, otherwise use
 // tryAccess.
 // ONLY USE THIS DURING SUBMISSION
-DescriptorSet& access(const BoundDescriptorSet&);
+DescriptorSet& access(const DescriptorSetRef&);
 
 // Creates a snapshot of all descriptors relevant to the given command.
 // For commands that aren't of type StateCmdBase (i.e. aren't

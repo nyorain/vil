@@ -509,9 +509,9 @@ void CommandViewer::displayDsList() {
 
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	auto toplevelFlags = ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth;
-	if(ImGui::TreeNodeEx("Descriptors", toplevelFlags)) {
+	if(pipe.layout && ImGui::TreeNodeEx("Descriptors", toplevelFlags)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		auto& pipeLayout = *cmd->boundPipe()->layout;
+		auto& pipeLayout = *pipe.layout;
 		auto size = std::min(dss.size(), pipeLayout.descriptors.size());
 		for(auto setID = 0u; setID < size; ++setID) {
 			auto& ds = dss[setID];

@@ -695,9 +695,14 @@ struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffe
 };
 
 struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescriptorSet> {
+	// NOTE: we don't keep the DescriptorSet alive to make ds handling
+	// efficient, so it might have been destroyed.
+	// However, trying to access it is possible via `tryAccess`.
+	using Set = DescriptorSetRef;
+
 	u32 firstSet;
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
-	span<DescriptorSet*> sets; // NOTE: handles may be invalid
+	span<DescriptorSetRef> sets;
 	span<u32> dynamicOffsets;
 
 	VkPipelineBindPoint pipeBindPoint {}; // only relevant for BindDescriptorSets

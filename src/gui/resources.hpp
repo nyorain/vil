@@ -110,15 +110,9 @@ private:
 	} buffer_;
 
 	struct {
-		struct Entry {
-			DescriptorPool* pool {};
-			DescriptorPoolSetEntry* entry {};
-			u32 id {};
-		};
-
-		std::vector<Entry> entries;
+		std::vector<DescriptorSetRef> entries;
 		std::vector<IntrusivePtr<DescriptorPool>> pools;
-		Entry selected {};
+		DescriptorSetRef selected {};
 		DescriptorStateCopyPtr state {};
 	} ds_;
 };

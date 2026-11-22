@@ -115,6 +115,7 @@ constexpr std::string_view supportedDevExts[] = {
 	"VK_KHR_maintenance9",
 	"VK_NVX_binary_import",
 	"VK_NVX_image_view_handle",
+	"VK_EXT_descriptor_heap",
 
 	// likely supported, mostly no-ops for vil itself
 	"VK_EXT_depth_range_unrestricted",

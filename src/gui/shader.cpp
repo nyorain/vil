@@ -480,12 +480,12 @@ const std::string& ShaderDebugger::fileName(u32 fileID) const {
 	dlg_assert(fileID < ir.sources.size());
 
 	auto& source = ir.sources[fileID];
-	if(source.fileID == 0u) {
+	if(source.file_id == 0u) {
 		static const auto empty = std::string {"unnamed"};
 		return empty;
 	}
 
-	auto& str = ir.get<spc::SPIRString>(source.fileID);
+	auto& str = ir.get<spc::SPIRString>(source.file_id);
 	return str.str;
 }
 

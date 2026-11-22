@@ -147,7 +147,7 @@ void ResourceVisitor::visit(RayTracingPipeline& p) {
 	visit(static_cast<Pipeline&>(p));
 }
 
-template<VkObjectType OT, typename HT, auto DevMapPtr>
+template<VkObjectType OT, typename HT, auto DevMapPtr, auto UsedHandlePtr>
 struct ObjectTypeMapImpl : ObjectTypeHandler {
 	static const ObjectTypeMapImpl instance;
 
@@ -169,6 +169,17 @@ struct ObjectTypeMapImpl : ObjectTypeHandler {
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
 		return visitor.visit(static_cast<HT&>(handle));
 	}
+
+	/*
+	bool contains(const UsedHandles& used, const Handle& handle) const override {
+		if constexpr (bool(UsedHandlePtr)) {
+			auto& set = used.*UsedHandlePtr;
+			return vil::find(set, (HT&) handle) != set.end();
+		}
+
+		return false;
+	}
+	*/
 };
 
 struct DescriptorSetTypeImpl : ObjectTypeHandler {
@@ -200,6 +211,13 @@ struct DescriptorSetTypeImpl : ObjectTypeHandler {
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
 		return visitor.visit(static_cast<Queue&>(handle));
 	}
+
+	/*
+	bool contains(const UsedHandles& used, const Handle&) const override {
+		dlg_error("TODO");
+		return false;
+	}
+	*/
 };
 
 struct QueueTypeImpl : ObjectTypeHandler {
@@ -235,9 +253,14 @@ struct QueueTypeImpl : ObjectTypeHandler {
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
 		return visitor.visit(static_cast<Queue&>(handle));
 	}
+	/*
+	bool contains(const UsedHandles&, const Handle&) const override {
+		return false;
+	}
+	*/
 };
 
-struct PipelineTypeImpl : ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes> {
+struct PipelineTypeImpl : ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes, nullptr> {
 	static const PipelineTypeImpl instance;
 
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
@@ -258,10 +281,27 @@ struct PipelineTypeImpl : ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &
 				break;
 		}
 	}
+
+	/*
+	bool contains(const UsedHandles& used, const Handle& handle) const override {
+		auto& pipe = static_cast<const Pipeline&>(handle);
+		switch(pipe.type) {
+			case VK_PIPELINE_BIND_POINT_GRAPHICS:
+				return vil::find(used.graphicsPipes, (GraphicsPipeline&) (handle)) != used.graphicsPipes.end();
+			case VK_PIPELINE_BIND_POINT_COMPUTE:
+				return vil::find(used.computePipes, (ComputePipeline&) (handle)) != used.computePipes.end();
+			case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+				return vil::find(used.rtPipes, (RayTracingPipeline&) (handle)) != used.rtPipes.end();
+			default:
+				dlg_error("unimplemented");
+				return false;
+		}
+	}
+	*/
 };
 
-template<VkObjectType OT, typename HT, auto DevMapPtr>
-const ObjectTypeMapImpl<OT, HT, DevMapPtr> ObjectTypeMapImpl<OT, HT, DevMapPtr>::instance;
+template<VkObjectType OT, typename HT, auto DevMapPtr, auto UsedHandlePtr>
+const ObjectTypeMapImpl<OT, HT, DevMapPtr, UsedHandlePtr> ObjectTypeMapImpl<OT, HT, DevMapPtr, UsedHandlePtr>::instance;
 
 const QueueTypeImpl QueueTypeImpl::instance;
 const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
@@ -269,32 +309,32 @@ const PipelineTypeImpl PipelineTypeImpl::instance;
 
 // alphabetical order
 static const ObjectTypeHandler* typeHandlers[] = {
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs, &UsedHandles::accelStructs>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers, &UsedHandles::buffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews, &UsedHandles::bufferViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools, nullptr>::instance,
 	&DescriptorSetTypeImpl::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT, IndirectCommandsLayout, &Device::indirectCommandsLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_EXECUTION_SET_EXT, IndirectExecutionSet, &Device::indirectExecutionSets>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates, &UsedHandles::dsuTemplates>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events, &UsedHandles::events>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers, &UsedHandles::framebuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews, &UsedHandles::imageViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT, IndirectCommandsLayout, &Device::indirectCommandsLayouts, &UsedHandles::indirectCommandLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_INDIRECT_EXECUTION_SET_EXT, IndirectExecutionSet, &Device::indirectExecutionSets, &UsedHandles::indirectExecutionSets>::instance,
 	&PipelineTypeImpl::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_EXT, ShaderObject, &Device::shaderObjects>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts, &UsedHandles::pipeLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses, &UsedHandles::renderPasses>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools, &UsedHandles::queryPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers, &UsedHandles::samplers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules, nullptr>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_EXT, ShaderObject, &Device::shaderObjects, &UsedHandles::shaderObjects>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains, nullptr>::instance,
 	&QueueTypeImpl::instance,
 };
 

@@ -1450,7 +1450,7 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
 	imGuiText("BindPoint: {}", vk::name(pipe.type));
 	imGuiText("CreateFlags: {}", vk::namePipelineCreateFlags(pipe.flags));
-	refButtonExpect(*gui_, pipe.layout.get());
+	if (pipe.layout) refButton(*gui_, *pipe.layout);
 
 	switch(pipe.type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
@@ -1734,7 +1734,7 @@ void ResourceGui::updateResourceList() {
 				auto& entry = ds_.entries.emplace_back();
 				entry.pool = dsPool.second.get();
 				entry.entry = it;
-				entry.id = it->set->id;
+				entry.dsID = it->set->id;
 				it = it->next;
 
 				if(entry.entry == ds_.selected.entry) {
@@ -1872,7 +1872,7 @@ void ResourceGui::draw(Draw& draw) {
 					std::lock_guard lock(entry.pool->mutex);
 					isDestroyed = !entry.entry->set ||
 						// in this case the dsPool-entry-slot was reused
-						(entry.entry->set->id != entry.id);
+						(entry.entry->set->id != entry.dsID);
 
 					if(!isDestroyed) {
 						label = name(*entry.entry->set, false);
@@ -1963,6 +1963,13 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::EndTable();
 }
 
+template<typename T> using HasUsedHandleSet =
+	decltype(GetUsedSet::get(std::declval<CommandRecord&>(), std::declval<T&>()));
+
+static_assert(validExpression<HasUsedHandleSet, Buffer>);
+static_assert(validExpression<HasUsedHandleSet, const Image>);
+static_assert(validExpression<HasUsedHandleSet, const Image&>);
+
 void ResourceGui::drawHandleDesc(Draw& draw) {
 	auto visitor = TemplateResourceVisitor([&](auto& res) {
 		if(editName_) {
@@ -1983,6 +1990,67 @@ void ResourceGui::drawHandleDesc(Draw& draw) {
 		ImGui::Spacing();
 
 		this->drawDesc(draw, res);
+
+		if constexpr (validExpression<HasUsedHandleSet, decltype(res)>) {
+			if (ImGui::TreeNode("Commands using this")) {
+				IntrusivePtr<CommandRecord> selRecord {};
+				Command* selCmd {};
+
+				{
+					std::lock_guard devLock(gui_->dev().mutex);
+					for (auto& [vkcb, cb] : gui_->dev().commandBuffers.inner) {
+						auto* rec = cb->lastRecordLocked();
+						if (!rec) continue;
+
+						auto& usedHandles = GetUsedSet::get(*rec, res);
+						auto it = findUsed(usedHandles, res);
+						if (it != usedHandles.end()) {
+							if (imGuiTreeNode("Used by {}", rec->cbName)) {
+								for (auto&& [i, cmd] : enumerate(it->commands)) {
+									ImGui::PushID(i);
+									if (ImGui::Button(cmd->toString().c_str())) {
+										selRecord.reset(rec);
+										selCmd = cmd;
+									}
+
+									ImGui::PopID();
+								}
+								ImGui::TreePop();
+							}
+						}
+					}
+				}
+
+				if (selRecord) {
+					gui_->cbGui().select(selRecord, selCmd);
+					gui_->activateTab(Gui::Tab::commandBuffer);
+				}
+
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNode("DescriptorSets using this")) {
+				std::lock_guard devLock(gui_->dev().mutex);
+				for (auto& [vkpool, pool] : gui_->dev().dsPools.inner) {
+					std::lock_guard poolLock(pool->mutex);
+					auto* entry = pool->usedEntries;
+					while (entry) {
+						dlg_assert(entry->set);
+						if (entry->set) {
+							auto& ds = *entry->set;
+							auto state = DescriptorStateRef(ds);
+							if (hasBound(state, res)) {
+								refButton(*gui_, ds);
+							}
+						}
+						entry = entry->next;
+					}
+				}
+
+				ImGui::TreePop();
+			}
+		}
+
 	});
 
 	if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
@@ -1999,7 +2067,7 @@ void ResourceGui::drawHandleDesc(Draw& draw) {
 			std::lock_guard devLock(gui_->dev().mutex);
 			std::lock_guard poolLock(ds_.selected.pool->mutex);
 			auto valid = ds_.selected.entry->set &&
-				ds_.selected.entry->set->id == ds_.selected.id;
+				ds_.selected.entry->set->id == ds_.selected.dsID;
 			if(valid) {
 				ds_.state = ds_.selected.entry->set->validateAndCopyLocked();
 			}
@@ -2008,17 +2076,57 @@ void ResourceGui::drawHandleDesc(Draw& draw) {
 		// draw
 		std::lock_guard lock(ds_.selected.pool->mutex);
 		auto valid = ds_.selected.entry->set &&
-			ds_.selected.entry->set->id == ds_.selected.id;
+			ds_.selected.entry->set->id == ds_.selected.dsID;
 		if(valid) {
 			drawDesc(draw, *ds_.selected.entry->set);
 		} else {
 			imGuiText("Was destroyed");
 			ds_.selected = {};
 		}
+
+		if (ImGui::TreeNode("Commands using this")) {
+			IntrusivePtr<CommandRecord> selRecord {};
+			Command* selCmd {};
+
+			{
+				std::lock_guard devLock(gui_->dev().mutex);
+				for (auto& [vkcb, cb] : gui_->dev().commandBuffers.inner) {
+					auto* rec = cb->lastRecordLocked();
+					if (!rec) continue;
+
+					UsedDescriptorSet rh(ThreadContext::instance.linalloc_);
+
+					auto& used = rec->used.descriptorSets;
+					auto it = findUsed(used, ds_.selected);
+					if (it != used.end()) {
+						if (imGuiTreeNode("Used by {}", rec->cbName)) {
+							for (auto&& [i, cmd] : enumerate(it->commands)) {
+								ImGui::PushID(i);
+								if (ImGui::Button(cmd->toString().c_str())) {
+									selRecord.reset(rec);
+									selCmd = cmd;
+								}
+
+								ImGui::PopID();
+							}
+							ImGui::TreePop();
+						}
+					}
+				}
+			}
+
+			if (selRecord) {
+				gui_->cbGui().select(selRecord, selCmd);
+				gui_->activateTab(Gui::Tab::commandBuffer);
+			}
+
+			ImGui::TreePop();
+		}
 	} else {
 		for(auto& handler : ObjectTypeHandler::handlers) {
 			if(handler && handler->objectType() == filter_) {
 				handler->visit(visitor, *handle_);
+				break;
 			}
 		}
 	}
@@ -2038,7 +2146,7 @@ void ResourceGui::select(Handle& handle, VkObjectType type) {
 		assertOwned(ds.pool->mutex);
 		ds_.selected.entry = ds.setEntry;
 		ds_.selected.pool = ds.pool;
-		ds_.selected.id = ds.id;
+		ds_.selected.dsID = ds.id;
 	} else {
 		handle_ = &handle;
 	}

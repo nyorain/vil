@@ -433,10 +433,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
-		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.stage = PipelineShaderStage(dev, pCreateInfos[i].stage);
 		pipe.flags = pCreateInfos[i].flags;
 		pipe.exts = copyChain(pCreateInfos[i].pNext);
+
+		if(pCreateInfos[i].layout) {
+			pipe.layout = getPtr(dev, pCreateInfos[i].layout);
+		}
 
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
@@ -756,10 +759,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
-		pipe.layout = getPtr(dev, ci.layout);
 		pipe.maxPipelineRayRecursionDepth = ci.maxPipelineRayRecursionDepth;
 		pipe.flags = ci.flags;
 		pipe.exts = copyChain(pCreateInfos[i].pNext);
+
+		if (ci.layout) {
+			pipe.layout = getPtr(dev, ci.layout);
+		}
 
 		// TODO: support, for shader patching
 		dlg_assertm(!ci.pLibraryInfo, "not supported");

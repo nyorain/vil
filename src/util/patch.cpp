@@ -819,7 +819,7 @@ void fixPhiInstructions(ShaderPatch& patch, u32 dstBlock,
 	}
 }
 
-void fixPhiInstructions(ShaderPatch& path, spc::SPIRBlock& srcBlock,
+void fixPhiInstructions(ShaderPatch& path, const spc::SPIRBlock& srcBlock,
 		u32 newBlockEnd) {
 	auto oldBlockEnd = srcBlock.self;
 	if(srcBlock.terminator == spc::SPIRBlock::Direct) {
@@ -878,8 +878,8 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 		dlg_debug("no exact match found: {} vs {}", line, lb->line);
 	}
 
-	dlg_assert_or(lb->function, return {});
-	dlg_assert_or(lb->block, return {});
+	dlg_assert_or(lb->function_id, return {});
+	dlg_assert_or(lb->block_id, return {});
 
 	patch.copy = ir.spirv;
 	patch.offsets = ir.section_offsets;
@@ -911,11 +911,14 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 	declareConstants(patch);
 
 	// parse local variables
+	auto& function = ir.get<spc::SPIRFunction>(lb->function_id);
+	auto& block = ir.get<spc::SPIRBlock>(lb->block_id);
+
 	vil::Type baseType;
 	baseType.type = vil::Type::typeStruct;
 
 	LinAllocVector<vil::Type::Member> members(patch.alloc);
-	members.reserve(lb->function->local_variables.size());
+	members.reserve(function.local_variables.size());
 
 	auto offset = 0u;
 	std::vector<VariableCapture> captures;
@@ -945,7 +948,7 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 	};
 
 	// capture local variables
-	for(auto& varID : lb->function->local_variables) {
+	for(auto& varID : function.local_variables) {
 		auto& var = ir.get<spc::SPIRVariable>(varID);
 		if(var.storage != spv::StorageClassFunction || var.phi_variable) {
 			continue;
@@ -959,7 +962,7 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 		auto name = ir.get_name(varID);
 		if(!var.debugLocalVariables.empty()) {
 			auto& lvar = ir.get<spc::SPIRDebugLocalVariable>(var.debugLocalVariables.front());
-			name = ir.get<spc::SPIRString>(lvar.nameID).str;
+			name = ir.get<spc::SPIRString>(lvar.name_id).str;
 		}
 
 		if(name.empty()) {
@@ -970,7 +973,7 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 	}
 
 	// capture function arguments
-	for(auto& param : lb->function->arguments) {
+	for(auto& param : function.arguments) {
 		auto name = ir.get_name(param.id);
 		if(name.empty()) {
 			continue;
@@ -1168,7 +1171,7 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 
 	// we changed control flow, have to fix phi instructions in following
 	// blocks.
-	fixPhiInstructions(patch, *lb->block, blockRest);
+	fixPhiInstructions(patch, block, blockRest);
 
 	// insert new function instructions
 	auto off = (patch.offsets.named.funcs - ir.section_offsets.named.funcs);
@@ -1210,7 +1213,7 @@ vku::Pipeline createPatchCopy(const ComputePipeline& src, VkShaderStageFlagBits 
 
 	VkComputePipelineCreateInfo cpi {};
 	cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	cpi.layout = src.layout->handle;
+	cpi.layout = src.layout ? src.layout->handle : VK_NULL_HANDLE;
 	cpi.stage.pSpecializationInfo = &specInfo;
 	cpi.stage.stage = stage;
 	cpi.stage.pName = src.stage.entryPoint.c_str();
@@ -1273,7 +1276,7 @@ vku::Pipeline createPatchCopy(const GraphicsPipeline& src,
 
 	VkGraphicsPipelineCreateInfo gpi {};
 	gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	gpi.layout = src.layout->handle;
+	gpi.layout = src.layout ? src.layout->handle : VK_NULL_HANDLE;
 	gpi.pRasterizationState = &src.rasterizationState;
 
 	if(!src.hasMeshShader) {
@@ -1325,7 +1328,7 @@ vku::Pipeline createPatchCopy(const RayTracingPipeline& src,
 
 	VkRayTracingPipelineCreateInfoKHR rti {};
 	rti.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-	rti.layout = src.layout->handle;
+	rti.layout = src.layout ? src.layout->handle : VK_NULL_HANDLE;
 	rti.maxPipelineRayRecursionDepth = src.maxPipelineRayRecursionDepth;
 	rti.pNext = src.exts.get();
 

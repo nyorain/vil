@@ -64,19 +64,6 @@ void CommandRecordGui::draw(Draw& draw) {
 	auto& dev = gui_->dev();
 	auto& hook = *dev.commandHook;
 
-	// Possibly update mode
-	auto modeName = [](CommandSelection::UpdateMode mode) {
-		switch(mode) {
-			case UpdateMode::none: return "Static";
-			case UpdateMode::commandBuffer: return "CommandBuffer";
-			case UpdateMode::any: return "Any";
-			case UpdateMode::swapchain: return "Swapchain";
-			case UpdateMode::localCapture: return "LocalCapture";
-			default:
-				dlg_error("unreachable");
-				return "";
-		}
-	};
 
 	auto updateMode = selector_.updateMode();
 	IntrusivePtr<Swapchain> swapchain;
@@ -85,29 +72,6 @@ void CommandRecordGui::draw(Draw& draw) {
 		if(!swapchain) {
 			clearSelection(true);
 			return;
-		}
-	} else if(updateMode != UpdateMode::localCapture) {
-		if(ImGui::BeginCombo("Update Source", modeName(updateMode))) {
-			if(ImGui::Selectable("None")) {
-				selector_.updateMode(UpdateMode::none);
-			}
-
-			if(!selector_.cb() && ImGui::Selectable("Any")) {
-				selector_.updateMode(UpdateMode::any);
-			}
-
-			// TODO: broken I guess? Needs support for automatically
-			// selecting cb in Selector
-			// auto cb = IntrusiveWrappedPtr<CommandBuffer>(selector_.cb());
-			// if(!cb) {
-			// 	std::lock_guard lock(dev.mutex);
-			// 	cb = IntrusivePtr<CommandWrappedBuffer>(record_->cb);
-			// }
-			// if(cb && ImGui::Selectable("CommandBuffer")) {
-			// 	selector_.updateMode(UpdateMode::commandBuffer);
-			// }
-
-			ImGui::EndCombo();
 		}
 	}
 
@@ -259,6 +223,50 @@ void CommandRecordGui::draw(Draw& draw) {
 			}
 		}
 	}
+
+	// Possibly update mode
+	if(updateMode != UpdateMode::localCapture && updateMode != UpdateMode::swapchain) {
+		auto modeName = [](CommandSelection::UpdateMode mode) {
+			switch(mode) {
+				case UpdateMode::none: return "None";
+				case UpdateMode::commandBuffer: return "CommandBuffer";
+				case UpdateMode::any: return "Any";
+				case UpdateMode::swapchain: return "Swapchain";
+				case UpdateMode::localCapture: return "LocalCapture";
+				default:
+					dlg_error("unreachable");
+					return "";
+			}
+		};
+
+		ImGui::SameLine();
+		ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+		ImGui::SameLine();
+
+		if(ImGui::BeginCombo("Update Source", modeName(updateMode))) {
+			if(ImGui::Selectable("None")) {
+				selector_.updateMode(UpdateMode::none);
+			}
+
+			if(!selector_.cb() && ImGui::Selectable("Any")) {
+				selector_.updateMode(UpdateMode::any);
+			}
+
+			// TODO: broken I guess? Needs support for automatically
+			// selecting cb in Selector
+			// auto cb = IntrusiveWrappedPtr<CommandBuffer>(selector_.cb());
+			// if(!cb) {
+			// 	std::lock_guard lock(dev.mutex);
+			// 	cb = IntrusivePtr<CommandWrappedBuffer>(record_->cb);
+			// }
+			// if(cb && ImGui::Selectable("CommandBuffer")) {
+			// 	selector_.updateMode(UpdateMode::commandBuffer);
+			// }
+
+			ImGui::EndCombo();
+		}
+	}
+
 
 	// == logical state update ==
 	auto doUpdate = updateTick_.tick();

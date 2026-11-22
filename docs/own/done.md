@@ -1093,3 +1093,4 @@ match rework 2, electric boogaloo
 - [x] fix with DLSS (doom)
 - [x] revisit timestamp queries. Shouldn't the first query be done
       *before* the hooked cmd and not after??
+- [x] try to enable bufferDeviceAddress if possible

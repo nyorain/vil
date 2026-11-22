@@ -837,7 +837,7 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 	auto copyDescriptors =
 		(flags & LocalCaptureBits::descriptors) ||
 		(flags & LocalCaptureBits::shaderDebugger);
-	if(pipe && copyDescriptors) {
+	if(pipe && pipe->layout && copyDescriptors) {
 		auto& layout = *pipe->layout;
 		for(auto [setID, dsLayout] : enumerate(layout.descriptors)) {
 			for(auto [bindingID, binding] : enumerate(dsLayout->bindings)) {

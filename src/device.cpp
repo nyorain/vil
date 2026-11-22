@@ -527,6 +527,7 @@ VkResult doCreateDevice(
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
 	auto enableDeviceFault = checkEnvBinary("VIL_DEVICE_FAULT", true);
 	auto enablePipeProps = checkEnvBinary("VIL_PIPELINE_PROPERTIES", true);
+	auto enableBufAddress = checkEnvBinary("VIL_BUFFER_DEVICE_ADDRESS", true);
 
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage &&
 		fpPhdevFeatures2 && fpPhdevProps2 && (
@@ -557,6 +558,10 @@ VkResult doCreateDevice(
 	auto hasPipePropsApi = enablePipeProps &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+	auto hasBufAddressApi = enableBufAddress &&
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
+			hasExt(supportedExts, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME));
 
 	auto hasTimelineSemaphores = false;
 	auto hasTransformFeedback = false;
@@ -566,6 +571,7 @@ VkResult doCreateDevice(
 	bool hasStorage16 = false;
 	bool hasDrawParams = false;
 	bool hasPipeProps = false;
+	bool hasBufAddress = false;
 
 	// find generally relevant feature structs in chain
 	VkPhysicalDeviceVulkan11Features features11 {};
@@ -584,6 +590,11 @@ VkResult doCreateDevice(
 	VkPhysicalDeviceShaderDrawParametersFeatures* inDrawParams {};
 	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR* inPipeProps {};
 
+	// NOTE: we potentially modify the structs that the application passes in.
+	// This is undesirable, however the alternative for enabling extensions
+	// here would be copying the chain which is risky as it isn't
+	// forward-compatible. Maybe allow behavior switching via environment
+	// variable?
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
 		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES) {
@@ -628,6 +639,8 @@ VkResult doCreateDevice(
 	VkPhysicalDevice8BitStorageFeatures storage8Features {};
 	VkPhysicalDeviceShaderDrawParametersFeatures drawParamsFeatures {};
 	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipePropFeatures {};
+	VkPhysicalDeviceBufferDeviceAddressFeatures bufAddressFeatures {};
+
 	if(fpPhdevFeatures2 && fpPhdevProps2) {
 		// query features support
 		VkPhysicalDeviceFeatures2 features2 {};
@@ -671,6 +684,11 @@ VkResult doCreateDevice(
 		if (hasPipePropsApi) {
 			pipePropFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR;
 			addChain(features2, pipePropFeatures);
+		}
+
+		if (hasBufAddressApi) {
+			bufAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+			addChain(features2, bufAddressFeatures);
 		}
 
 		fpPhdevFeatures2(phdev, &features2);
@@ -797,6 +815,25 @@ VkResult doCreateDevice(
 				newExts.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 			}
 		}
+
+		if (bufAddressFeatures.bufferDeviceAddress) {
+			hasBufAddress = true;
+
+			if (inBufAddr) {
+				inBufAddr->bufferDeviceAddress = true;
+			} else if (inVulkan12) {
+				inVulkan12->bufferDeviceAddress = true;
+			} else {
+				addChain(nci, bufAddressFeatures);
+			}
+
+			// also need to enable extension
+			if(!ini.vulkan12 || phdevProps.apiVersion < VK_API_VERSION_1_2) {
+				if(!hasExt(newExts, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
+					newExts.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+				}
+			}
+		}
 	}
 
 	// = Useful extensions =
@@ -867,18 +904,11 @@ VkResult doCreateDevice(
 	dev.storage16Bit = hasStorage16;
 	dev.shaderDrawParameters = hasDrawParams;
 	dev.pipeProps = hasPipeProps;
+	dev.bufferDeviceAddress = hasBufAddress;
 
 	if(hasAddressBindingReport) {
 		dev.addressMap = std::make_unique<DeviceAddressMap>();
 		dev.addressMap->init(dev);
-	}
-
-	// NOTE: we don't ever enable buffer device address and just
-	// want to track whether it's enabled.
-	if(inVulkan12) {
-		dev.bufferDeviceAddress = inVulkan12->bufferDeviceAddress;
-	} else if(inBufAddr) {
-		dev.bufferDeviceAddress = inBufAddr->bufferDeviceAddress;
 	}
 
 	dev.appExts = {extsBegin, extsEnd};

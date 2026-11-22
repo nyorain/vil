@@ -584,6 +584,49 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const 
 }
 
 // DrawCmdBase
+void displayDescriptorState(Gui& gui, const DescriptorState& state) {
+	if (state.descriptorSets.empty()) return;
+
+	if (imGuiTreeNode("{} bound descriptorSets", state.descriptorSets.size())) {
+		for (auto [setID, bds] : enumerate(state.descriptorSets)) {
+			ImGui::Bullet();
+
+			dlg_assert(!!bds.pool == !!bds.entry);
+
+			if (bds.layout) {
+				auto& setLayout = bds.layout->descriptors[setID];
+				if (setLayout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT) {
+					dlg_assert(!bds.entry);
+
+					// TODO: use bds.pushDescriptors
+					imGuiText("Push Descriptor Set. TODO: show contents");
+					continue;
+				}
+			}
+
+			auto [ds, lock] = tryAccess(bds);
+			if (!ds) {
+				imGuiText("<Destroyed>");
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("The descriptor set was destroyed since this command was recorded");
+				}
+				continue;
+			}
+
+			// TODO: could use descriptorSnapshot if available?
+
+			refButton(gui, *ds);
+
+			if (setID < bds.dynamicOffsets.size()) {
+				ImGui::SameLine();
+				imGuiText("Dynamic offset: {}", bds.dynamicOffsets[setID]);
+			}
+		}
+
+		ImGui::TreePop();
+	}
+}
+
 DrawCmdBase::DrawCmdBase() = default;
 
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb) :
@@ -591,6 +634,9 @@ DrawCmdBase::DrawCmdBase(CommandBuffer& cb) :
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
+	refButtonD(gui, state->pipe);
+	displayDescriptorState(gui, *state);
+
 	if(indices) {
 		dlg_assert(state->indices.buffer);
 		imGuiText("Index Buffer: ");
@@ -600,8 +646,6 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		imGuiText("Offset {}, Type {}", state->indices.offset,
 			vk::name(state->indices.type));
 	}
-
-	refButtonD(gui, state->pipe);
 
 	imGuiText("Vertex buffers");
 	for(auto& vertBuf : state->vertices) {
@@ -700,7 +744,7 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 
 		ImGui::Unindent();
 	} else if(!state->pipe) {
-		imGuiText("Can't display relevant dynamic state, pipeline was destroyed");
+		imGuiText("<No pipeline>");
 	} else if(state->pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
 	}
@@ -759,20 +803,22 @@ MatchVal DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 		}
 	}
 
-	for(auto& pcr : state->pipe->layout->pushConstants) {
-		// TODO: these asserts can trigger if parts of the push constant
-		// range was left undefined. It might not be used by the shader
-		// anyways. No idea how to fix.
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= pushConstants.data.size(), continue);
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+	if (state->pipe->layout) {
+		for(auto& pcr : state->pipe->layout->pushConstants) {
+			// TODO: these asserts can trigger if parts of the push constant
+			// range was left undefined. It might not be used by the shader
+			// anyways. No idea how to fix.
+			dlg_assertl_or(dlg_level_warn,
+				pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+			dlg_assertl_or(dlg_level_warn,
+				pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
-		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
-		m.total += pcrWeight;
-		if(std::memcmp(&pushConstants.data[pcr.offset],
-				&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcrWeight;
+			auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
+			m.total += pcrWeight;
+			if(std::memcmp(&pushConstants.data[pcr.offset],
+					&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
+				m.match += pcrWeight;
+			}
 		}
 	}
 
@@ -1009,7 +1055,19 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 // BindDescriptorSetCmd
 void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	ThreadMemScope memScope;
-	auto vkds = rawHandles(memScope, sets);
+	auto vkds = memScope.alloc<VkDescriptorSet>(sets.size());
+
+	// when this is called, we can assume that all DescriptorSets are still
+	// alive.
+	for (auto&& [i, set] : enumerate(sets)) {
+		if (!set.entry) {
+			vkds[i] = VK_NULL_HANDLE;
+			continue;
+		}
+
+		auto& ds = access(set);
+		vkds[i] = ds.handle;
+	}
 
 	if (stageFlags) {
 		VkBindDescriptorSetsInfo info;
@@ -1059,17 +1117,22 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 
 	// NOTE: we can't rely on the set handles being valid anymore.
 	// Could make it an env var option.
-	/*
-	for (auto* ds : sets) {
+	for (auto set : sets) {
 		ImGui::Bullet();
 
-		if(!ds) {
-			imGuiText("null or invalidated");
-		} else {
-			refButton(gui, *ds);
+		auto [ds, lock] = tryAccess(set);
+		if (!ds) {
+			imGuiText("<Destroyed>");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("The descriptor set was destroyed since this command was recorded");
+			}
+			continue;
 		}
+
+		// TODO: could use descriptorSnapshot if available?
+
+		refButton(gui, *ds);
 	}
-	*/
 }
 
 // DispatchCmdBase
@@ -1079,6 +1142,7 @@ DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	refButtonD(gui, state->pipe);
+	displayDescriptorState(gui, *state);
 }
 
 MatchVal DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
@@ -1089,14 +1153,17 @@ MatchVal DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
 	}
 
 	MatchVal m;
-	for(auto& pcr : state->pipe->layout->pushConstants) {
-		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
-		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
-		m.total += pcr.size;
-		if(std::memcmp(&pushConstants.data[pcr.offset],
-				&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcr.size;
+	if (state->pipe->layout) {
+		for(auto& pcr : state->pipe->layout->pushConstants) {
+			dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+			dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+
+			m.total += pcr.size;
+			if(std::memcmp(&pushConstants.data[pcr.offset],
+					&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
+				m.match += pcr.size;
+			}
 		}
 	}
 
@@ -2111,14 +2178,17 @@ MatchVal TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	}
 
 	MatchVal m;
-	for(auto& pcr : state->pipe->layout->pushConstants) {
-		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
-		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
-		m.total += pcr.size;
-		if(std::memcmp(&pushConstants.data[pcr.offset],
-				&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcr.size;
+	if (state->pipe->layout) {
+		for(auto& pcr : state->pipe->layout->pushConstants) {
+			dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+			dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+
+			m.total += pcr.size;
+			if(std::memcmp(&pushConstants.data[pcr.offset],
+					&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
+				m.match += pcr.size;
+			}
 		}
 	}
 
@@ -2146,6 +2216,7 @@ void TraceRaysCmd::displayInspector(Gui& gui) const {
 	}});
 
 	refButtonD(gui, state->pipe);
+	displayDescriptorState(gui, *state);
 }
 
 void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {

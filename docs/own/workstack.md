@@ -1,4 +1,5 @@
 - [ ] add eye dome lighting to vertex viewer (optionally?)
+	- [ ] would require rendering to separate target first
 - [ ] fix beginRendering crash
 - [ ] fix VIL_ALLOW_UNSUPPORTED_EXTS to not filter out exts
 	- [ ] or add new var for this?
@@ -6,7 +7,6 @@
 	- [ ] support live shader replacement?
 - [ ] support ray tracing pipeline libraries
 	- [ ] for shader patching
-- [ ] try to enable bufferDeviceAddress if possible
 - [ ] fix errors with validation tests
 	- [ ] document how to run validation tests
 - [ ] when VIL_SKIP_EXT_CHECK is set (or other env var?) override supported
@@ -18,7 +18,7 @@
 	  e.g. vkCmdSetDescriptorBufferOffsets2EXT: (vulkan1.4|maintenance6) + EXT_descriptor_buffer
 
 - [ ] implement VK_KHR_dynamic_rendering_local_read for core 1.4
-- [ ] impement VK_KHR_pipeline_executable_properties
+- [ ] impement VK_KHR_pipeline_executable_properties (unwrap pipe handle)
 - [ ] fix invalid pipeline barrier with BeginRendering (test e.g. with iro gpuDebugDraw)
 - [ ] fix vulkan samples "Losing open cmd" with trianglevulkan13
 - [ ] copyChain: add functions for proper deep copying

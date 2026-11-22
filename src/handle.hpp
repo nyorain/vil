@@ -134,6 +134,8 @@ struct ObjectTypeHandler {
 	// API guarantees that the handle stays valid since its lifetime is not bound
 	// to the device mutex.
 	virtual Handle* find(Device& dev, u64 handleToFind, u64& fwdID) const = 0;
+
+	// virtual bool contains(const UsedHandles& used, const Handle& handle) const = 0;
 };
 
 // api

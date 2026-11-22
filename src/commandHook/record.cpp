@@ -273,6 +273,8 @@ void CommandHookRecord::dispatchRecord(Command& cmd, RecordInfo& info) {
 		if(!dcmd.pushConstants.data.empty()) {
 			auto data = dcmd.pushConstants.data;
 			auto& layout = dcmd.state->pipe->layout;
+			dlg_assert(layout);
+
 			for(auto& pcr : layout->pushConstants) {
 				if(!(pcr.stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) ||
 						pcr.offset >= data.size()) {
@@ -783,14 +785,17 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	auto& bindingLayout = dsLayout.bindings[bindingID];
 	dlg_assert_or(elemID < bindingLayout.descriptorCount, return);
 
+	// NOTE: do we really need to access the cow here? We should be able
+	// to assume that the record is still able, allowing us to use
+	// the descriptor itself.
 	std::unique_lock<DebugMutex> dsCowLock;
 	DescriptorStateRef descriptors;
 
-	dlg_assert_or(bool(bds.dsEntry) == bool(bds.dsPool), return);
+	dlg_assert_or(bool(bds.entry) == bool(bds.pool), return);
 
-	if (bds.dsEntry) {
+	if (bds.entry) {
 		dlg_assert(!(dsLayout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT));
-		auto it = info.descriptors->states.find(bds.dsEntry);
+		auto it = info.descriptors->states.find(bds.entry);
 		if(it == info.descriptors->states.end()) {
 			dlg_error("Could not find descriptor in snapshot??");
 			return;

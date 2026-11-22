@@ -100,9 +100,9 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 #endif // DS_DISTURB_CHECKS
 
 		descriptorSets[s].layout = &layout;
-		descriptorSets[s].dsEntry = sets[i]->setEntry;
+		descriptorSets[s].entry = sets[i]->setEntry;
 		descriptorSets[s].dsID = sets[i]->id;
-		descriptorSets[s].dsPool = sets[i]->pool;
+		descriptorSets[s].pool = sets[i]->pool;
 
 		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
 		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);
@@ -640,34 +640,11 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-struct GetUsedSet {
-	static auto& get(CommandRecord& rec, const Image&) { return rec.used.images; }
-	static auto& get(CommandRecord& rec, const Buffer&) { return rec.used.buffers; }
-	static auto& get(CommandRecord& rec, const ImageView&) { return rec.used.imageViews; }
-	static auto& get(CommandRecord& rec, const BufferView&) { return rec.used.bufferViews; }
-	static auto& get(CommandRecord& rec, const Sampler&) { return rec.used.samplers; }
-	static auto& get(CommandRecord& rec, const Event&) { return rec.used.events; }
-	static auto& get(CommandRecord& rec, const PipelineLayout&) { return rec.used.pipeLayouts; }
-	static auto& get(CommandRecord& rec, const DescriptorUpdateTemplate&) { return rec.used.dsuTemplates; }
-	static auto& get(CommandRecord& rec, const RenderPass&) { return rec.used.renderPasses; }
-	static auto& get(CommandRecord& rec, const Framebuffer&) { return rec.used.framebuffers; }
-	static auto& get(CommandRecord& rec, const QueryPool&) { return rec.used.queryPools; }
-	static auto& get(CommandRecord& rec, const AccelStruct&) { return rec.used.accelStructs; }
-	static auto& get(CommandRecord& rec, const GraphicsPipeline&) { return rec.used.graphicsPipes; }
-	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
-	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
-	static auto& get(CommandRecord& rec, const DescriptorPool&) { return rec.used.dsPools; }
-
-	static auto& get(CommandRecord& rec, const ShaderObject&) { return rec.used.shaderObjects; }
-	static auto& get(CommandRecord& rec, const IndirectCommandsLayout&) { return rec.used.indirectCommandLayouts; }
-	static auto& get(CommandRecord& rec, const IndirectExecutionSet&) { return rec.used.indirectExecutionSets; }
-};
-
 template<typename T>
 auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 	ExtZoneScoped;
 	auto& set = GetUsedSet::get(rec, handle);
-	auto it = find(set, handle);
+	auto it = findUsed(set, handle);
 
 	if(it == set.end()) {
 		RefHandle<T> rh(rec.alloc);
@@ -678,7 +655,7 @@ auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 	}
 
 	auto& use = const_cast<RefHandle<T>&>(*it);
-	// use.commands.push_back(&cmd);
+	use.commands.push_back(&cmd);
 	(void) cmd;
 	return use;
 }
@@ -686,7 +663,7 @@ auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	ExtZoneScoped;
 	auto& set = rec.used.images;
-	auto it = find(set, img);
+	auto it = findUsed(set, img);
 
 	if(it == set.end()) {
 		UsedImage rh(rec.alloc);
@@ -697,7 +674,7 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	}
 
 	auto& use = const_cast<UsedImage&>(*it);
-	// use.commands.push_back(&cmd);
+	use.commands.push_back(&cmd);
 	(void) cmd;
 	return use;
 }
@@ -705,16 +682,18 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
 	ExtZoneScoped;
 	auto& set = rec.used.descriptorSets;
-	auto it = find(set, ds);
+	auto it = findUsed(set, ds);
 
 	if(it == set.end()) {
 		UsedDescriptorSet rh(rec.alloc);
-		rh.ds = static_cast<void*>(&ds);
+		rh.dsID = ds.id;
+		rh.entry = ds.setEntry;
+		rh.pool = ds.pool;
 		it = set.insert(std::move(rh)).first;
 	}
 
 	auto& use = const_cast<UsedDescriptorSet&>(*it);
-	// use.commands.push_back(&cmd);
+	use.commands.push_back(&cmd);
 	(void) cmd;
 	return use;
 }
@@ -1117,22 +1096,27 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cmd.sets = alloc<DescriptorSet*>(cb, descriptorSetCount);
+	cmd.sets = alloc<BindDescriptorSetCmd::Set>(cb, descriptorSetCount);
 
 	useHandle(cb, cmd, *pipeLayoutPtr);
 
 	ThreadMemScope memScope;
 	auto setHandles = memScope.allocUndef<VkDescriptorSet>(descriptorSetCount);
+	auto descriptorSets = memScope.allocUndef<DescriptorSet*>(descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		if(!pDescriptorSets[i]) { // null handles are allowed
-			cmd.sets[i] = nullptr;
+			cmd.sets[i] = {};
 			setHandles[i] = {};
+			descriptorSets[i] = {};
 			continue;
 		}
 
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
-		cmd.sets[i] = &ds;
+		descriptorSets[i] = &ds;
+		cmd.sets[i].entry = ds.setEntry;
+		cmd.sets[i].dsID = ds.id;
+		cmd.sets[i].pool = ds.pool;
 		setHandles[i] = ds.handle;
 
 		useHandle(cb, cmd, ds);
@@ -1143,13 +1127,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.newComputeState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newComputeState().bind(cb, *cmd.pipeLayout, firstSet, descriptorSets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, firstSet, descriptorSets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
-		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, firstSet, descriptorSets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -1889,7 +1873,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 
 		auto& rec = *recordPtr;
 
-		static_assert(CommandRecord::UsedHandles::handleTypeCount == 17u);
+		static_assert(UsedHandles::handleTypeCount == 20u);
 
 		useAllHandles(rec.used.buffers);
 		useAllHandles(rec.used.computePipes);
@@ -1907,8 +1891,14 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		useAllHandles(rec.used.events);
 		useAllHandles(rec.used.dsPools);
 
+		useAllHandles(rec.used.shaderObjects);
+		useAllHandles(rec.used.indirectCommandLayouts);
+		useAllHandles(rec.used.indirectExecutionSets);
+
 		for(auto& uds : rec.used.descriptorSets) {
-			useHandle(cb, cmd, *static_cast<DescriptorSet*>(uds.ds));
+			dlg_assert_or(uds.entry && uds.pool, continue);
+			auto& ds = access(uds);
+			useHandle(cb, cmd, ds);
 		}
 
 		for(auto& uimg : rec.used.images) {
@@ -2487,10 +2477,10 @@ span<DescriptorStateRef> forkPushDescriptors(ThreadMemScope& tms,
 		// NOTE: technically, we should clear the span every time the
 		// layout changes. But we don't gain anything from this tracking,
 		// applications have to bind everything.
-		dlg_assert(bool(dstSet.dsEntry) == bool(dstSet.dsPool));
-		dlg_assert(dstSet.layout || !dstSet.dsPool);
+		dlg_assert(bool(dstSet.entry) == bool(dstSet.pool));
+		dlg_assert(dstSet.layout || !dstSet.pool);
 
-		if (!dstSet.dsPool && dstSet.layout && neededSize == dstSet.pushDescriptors.size()) {
+		if (!dstSet.pool && dstSet.layout && neededSize == dstSet.pushDescriptors.size()) {
 			dstSet.pushDescriptors = copySpan(cb, dstSet.pushDescriptors);
 		} else {
 			// force invalidation here
@@ -3643,16 +3633,27 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, info.layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cmd.sets = alloc<DescriptorSet*>(cb, info.descriptorSetCount);
+	cmd.sets = alloc<BindDescriptorSetCmd::Set>(cb, info.descriptorSetCount);
 
 	useHandle(cb, cmd, *pipeLayoutPtr);
 
 	ThreadMemScope memScope;
 	auto setHandles = memScope.allocUndef<VkDescriptorSet>(info.descriptorSetCount);
+	auto descriptorSets = memScope.allocUndef<DescriptorSet*>(info.descriptorSetCount);
 	for(auto i = 0u; i < info.descriptorSetCount; ++i) {
+		if(!info.pDescriptorSets[i]) { // null handles are allowed
+			cmd.sets[i] = {};
+			setHandles[i] = {};
+			descriptorSets[i] = {};
+			continue;
+		}
+
 		auto& ds = get(*cb.dev, info.pDescriptorSets[i]);
 
-		cmd.sets[i] = &ds;
+		descriptorSets[i] = &ds;
+		cmd.sets[i].entry = ds.setEntry;
+		cmd.sets[i].dsID = ds.id;
+		cmd.sets[i].pool = ds.pool;
 		setHandles[i] = ds.handle;
 
 		useHandle(cb, cmd, ds);
@@ -3667,15 +3668,15 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(
 	// update bound state
 	// TODO: not sure if this is correct, spec is unclear
 	if(info.stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) {
-		cb.newComputeState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+		cb.newComputeState().bind(cb, *cmd.pipeLayout, info.firstSet, descriptorSets,
 			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
 	}
 	if(info.stageFlags & graphicsStages) {
-		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, info.firstSet, descriptorSets,
 			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
 	}
 	if(info.stageFlags & rtStages) {
-		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, info.firstSet, cmd.sets,
+		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, info.firstSet, descriptorSets,
 			{info.pDynamicOffsets, info.pDynamicOffsets + info.dynamicOffsetCount});
 	}
 
@@ -4458,6 +4459,15 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDataEXT(
 	auto psrc = static_cast<const std::byte*>(cmd.info.data.address);
 	auto copied = copySpan(cb, psrc, cmd.info.data.size);
 	cmd.info.data.address = copied.data();
+
+	// reallocate constants
+	// TODO: for correctness, we would have to track + invalidate push-constant
+	//   state (and vice versa). Not doing that for simplicity, applications
+	//   shouldn't mix them anyway.
+	auto& pc = cb.pushConstants().data;
+	auto allocSize = std::max<u32>(cmd.info.offset + cmd.info.data.size, pc.size());
+	pc = alloc<std::byte>(cb, allocSize);
+	std::memcpy(pc.data() + cmd.info.offset, cmd.info.data.address, cmd.info.data.size);
 
 	record(cb, cmd);
 }

@@ -857,12 +857,12 @@ bool potentiallyWritesLocked(const Submission& subm, const Image* img, const Buf
 			auto& rec = *cb->lastRecordLocked();
 
 			if(buf) {
-				auto it = find(rec.used.buffers, const_cast<Buffer&>(*buf));
+				auto it = findUsed(rec.used.buffers, const_cast<Buffer&>(*buf));
 				if(it != rec.used.buffers.end()) {
 					return true;
 				}
 			} else if(img) {
-				auto it = find(rec.used.images, const_cast<Image&>(*img));
+				auto it = findUsed(rec.used.images, const_cast<Image&>(*img));
 				if(it != rec.used.images.end()) {
 					return true;
 				}
@@ -873,11 +873,11 @@ bool potentiallyWritesLocked(const Submission& subm, const Image* img, const Buf
 			for(auto& uds : rec.used.descriptorSets) {
 				// in this case we know that the bound descriptor set must
 				// still be valid
-				auto& state = *static_cast<DescriptorSet*>(uds.ds);
+				auto& ds = access(uds);
 				// important that the ds mutex is locked mainly for
 				// update_unused_while_pending.
-				auto lock = state.lock();
-				if((img && hasBound(state, *img)) || (buf && hasBound(state, *buf))) {
+				auto lock = ds.lock();
+				if((img && hasBound(ds, *img)) || (buf && hasBound(ds, *buf))) {
 					return true;
 				}
 			}

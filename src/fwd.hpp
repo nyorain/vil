@@ -94,6 +94,7 @@ struct ParentCommand;
 struct SectionCommand;
 struct RootCommand;
 struct UsedHandle;
+struct UsedHandles;
 struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandMemBlock;
@@ -183,6 +184,18 @@ enum class MatchType {
 	mixed,
 	// do deep matching also for unnamed handles
 	deep,
+};
+
+// References a descriptorSet. To handle descriptorSets efficiently,
+// we never keep them alive. But this struct allows to reference them
+// and then verify later that they are still alive, allowing access.
+// See CommandDescriptorSnapshot that maps these pointers
+// to the DescriptorState at submission time.
+// Use the `tryAccess` method defined in record.hpp.
+struct DescriptorSetRef {
+	DescriptorPool* pool {};
+	DescriptorPoolSetEntry* entry {};
+	u32 dsID {};
 };
 
 void onDeviceLost(Device& dev);

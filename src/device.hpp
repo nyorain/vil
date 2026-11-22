@@ -215,6 +215,8 @@ struct Device {
 	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
 
 	// === Maps of all vulkan handles ===
+	// NOTE: descriptorSets only contains descriptor sets when they
+	// are not wrapped.
 	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 	SyncedIntrusiveWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 

@@ -341,6 +341,8 @@ MatchVal matchDeep(const Pipeline& a, const Pipeline& b) {
 		return MatchVal::noMatch();
 	}
 
+	if (!a.layout && !b.layout) { return {1.f, 1.f}; }
+
 	// check for layout compat
 	if(!a.layout || !b.layout || conflicting(*a.layout.get(), *b.layout.get())) {
 		return MatchVal::noMatch();
@@ -1256,43 +1258,47 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 			auto* srcPipe = srcCmd->boundPipe();
 			auto* dstPipe = dstCmd->boundPipe();
 
-			// hard guarantee from matching: we never match state commands with
-			// incompatible pipes. Would lead to issues later on, e.g.
-			// gui code might assume this as well
-			dlg_assert_or(!conflicting(*srcPipe->layout, *dstPipe->layout), continue);
+			dlg_assert(!!srcPipe->layout == !!dstPipe->layout);
 
-			auto srcDescriptors = srcCmd->boundDescriptors().descriptorSets;
-			auto dstDescriptors = dstCmd->boundDescriptors().descriptorSets;
+			if (srcPipe->layout && dstPipe->layout) {
+				// hard guarantee from matching: we never match state commands with
+				// incompatible pipes. Would lead to issues later on, e.g.
+				// gui code might assume this as well
+				dlg_assert_or(!conflicting(*srcPipe->layout, *dstPipe->layout), continue);
 
-			auto dsCount = dstPipe->layout->descriptors.size();
-			auto srcBound = srcDescriptors.first(std::min(dsCount, srcDescriptors.size()));
-			auto dstBound = dstDescriptors.first(std::min(dsCount, dstDescriptors.size()));
+				auto srcDescriptors = srcCmd->boundDescriptors().descriptorSets;
+				auto dstDescriptors = dstCmd->boundDescriptors().descriptorSets;
 
-			if(!dstBound.empty() || !srcBound.empty()) {
-				// TODO: consider dynamic offsets?
-				for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
-					// We cannot rely on the src record being valid here
-					// srcLock will hold a look on the ds pool while
-					// dstLock below will hold a lock on a specific cow (valid
-					// lock order).
-					auto [srcDs, srcLock] = tryAccessState(srcCmd->boundDescriptors(), i);
-					if (!srcDs.data) {
-						continue;
+				auto dsCount = dstPipe->layout->descriptors.size();
+				auto srcBound = srcDescriptors.first(std::min(dsCount, srcDescriptors.size()));
+				auto dstBound = dstDescriptors.first(std::min(dsCount, dstDescriptors.size()));
+
+				if(!dstBound.empty() || !srcBound.empty()) {
+					// TODO: consider dynamic offsets?
+					for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
+						// We cannot rely on the src record being valid here
+						// srcLock will hold a look on the ds pool while
+						// dstLock below will hold a lock on a specific cow (valid
+						// lock order).
+						auto [srcDs, srcLock] = tryAccessState(srcCmd->boundDescriptors(), i);
+						if (!srcDs.data) {
+							continue;
+						}
+
+						auto [dstDs, dstLock] = accessSet(
+							dstCmd->boundDescriptors(), i, dstDsState);
+						if (!dstDs.data) {
+							continue;
+						}
+
+						auto res = vil::match(mt, srcDs, dstDs);
+						m.match += res.match;
+						m.total += res.total;
 					}
 
-					auto [dstDs, dstLock] = accessSet(
-						dstCmd->boundDescriptors(), i, dstDsState);
-					if (!dstDs.data) {
-						continue;
-					}
-
-					auto res = vil::match(mt, srcDs, dstDs);
-					m.match += res.match;
-					m.total += res.total;
+					// auto dsMatch = float(match) / std::max(srcBound.size(), dstBound.size());
+					// dlg_trace("match: {}, dsMatch: {}", m, dsMatch);
 				}
-
-				// auto dsMatch = float(match) / std::max(srcBound.size(), dstBound.size());
-				// dlg_trace("match: {}, dsMatch: {}", m, dsMatch);
 			}
 		}
 
@@ -1648,24 +1654,28 @@ MatchVal matchState(MatchType matchType, const StateCmdBase& a, const StateCmdBa
 	// this case should have already been caught in the incomptabile-pipeline
 	// case above
 	dlg_assert_or(a.boundPipe() && b.boundPipe(), return MatchVal::noMatch());
-	dlg_assert_or(a.boundPipe()->layout->pushConstants.size() ==
-			b.boundPipe()->layout->pushConstants.size(),
-			return MatchVal::noMatch());
+	dlg_assert_or(!!a.boundPipe()->layout == !!b.boundPipe()->layout, return MatchVal::noMatch());
 
-	for(auto& pcr : a.boundPipe()->layout->pushConstants) {
-		// this can happen if parts of the push constant
-		// range was left undefined. It might not be used by the shader
-		// anyways. Not sure how to fix.
-		if(pcr.offset + pcr.size > a.boundPushConstants().data.size() ||
-				pcr.offset + pcr.size > b.boundPushConstants().data.size()) {
-			continue;
-		}
+	if (a.boundPipe()->layout && b.boundPipe()->layout) {
+		dlg_assert_or(a.boundPipe()->layout->pushConstants.size() ==
+				b.boundPipe()->layout->pushConstants.size(),
+				return MatchVal::noMatch());
 
-		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
-		m.total += pcrWeight;
-		if(std::memcmp(&a.boundPushConstants().data[pcr.offset],
-				&b.boundPushConstants().data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcrWeight;
+		for(auto& pcr : a.boundPipe()->layout->pushConstants) {
+			// this can happen if parts of the push constant
+			// range was left undefined. It might not be used by the shader
+			// anyways. Not sure how to fix.
+			if(pcr.offset + pcr.size > a.boundPushConstants().data.size() ||
+					pcr.offset + pcr.size > b.boundPushConstants().data.size()) {
+				continue;
+			}
+
+			auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
+			m.total += pcrWeight;
+			if(std::memcmp(&a.boundPushConstants().data[pcr.offset],
+					&b.boundPushConstants().data[pcr.offset], pcr.size) == 0u) {
+				m.match += pcrWeight;
+			}
 		}
 	}
 
