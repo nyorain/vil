@@ -40,8 +40,8 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 
 	auto stype = &compiler.get_type(typeID);
 	if(stype->pointer) {
-		TODO: just ignoring this won't work! will be missing
-		decorations.
+		// TODO
+		dlg_error("TODO: just ignoring this won't work! will be missing decorations.");
 
 		// dlg_assert(stype->parent_type);
 		// typeID = stype->parent_type;

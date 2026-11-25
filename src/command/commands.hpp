@@ -1911,6 +1911,7 @@ struct PushDataCmd final : CmdDerive<Command, CommandType::pushData> {
 	VkPushDataInfoEXT info;
 	std::string_view nameDesc() const override { return "PushData"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void displayInspector(Gui& gui) const override;
 	Category category() const override { return Category::bind; }
 };
 
